@@ -39,12 +39,12 @@ class DashcamStatus {
     return DashcamStatus(
       isRecording: map['isRecording'] as bool? ?? false, elapsedSeconds: map['elapsedSeconds'] as int? ?? 0,
       storageUsedMb: map['storageUsedMb'] as int? ?? 0, freeStorageMb: map['freeStorageMb'] as int? ?? 0,
-      lastSegment: map['lastSegment'] as String? ?? '-' , lastSegmentLocked: map['lastSegmentLocked'] as bool? ?? false,
-      warning: map['warning'] as String? ?? '' , isFrontCamera: map['isFrontCamera'] as bool? ?? false,
+      lastSegment: map['lastSegment'] as String? ?? '-', lastSegmentLocked: map['lastSegmentLocked'] as bool? ?? false,
+      warning: map['warning'] as String? ?? '', isFrontCamera: map['isFrontCamera'] as bool? ?? false,
     );
   }
 
-  static const idle = DashcamStatus(isRecording: false, elapsedSeconds: 0, storageUsedMb: 0, freeStorageMb: 0, lastSegment: '-' , lastSegmentLocked: false, warning: '' , isFrontCamera: false);
+  static const idle = DashcamStatus(isRecording: false, elapsedSeconds: 0, storageUsedMb: 0, freeStorageMb: 0, lastSegment: '-', lastSegmentLocked: false, warning: '', isFrontCamera: false);
 }
 
 class DashcamPlatformBridge {
@@ -71,36 +71,20 @@ class _DashcamHomePageState extends State<DashcamHomePage> {
   bool _busy = false;
   String _appVersion = 'Caricamento...';
   bool _isFrontCamera = false;
-  String _persistedLastSegment = '-';
-  bool _persistedLastSegmentLocked = false;
 
   @override
   void initState() {
     super.initState();
     _loadInitData();
-    _statusSub = DashcamPlatformBridge.watchStatus().listen((s) async { 
-      setState(() { _status = s; _error = ''; }); 
-      if (s.lastSegment != '-') {
-        if (s.lastSegment != _persistedLastSegment || s.lastSegmentLocked != _persistedLastSegmentLocked) {
-          _persistedLastSegment = s.lastSegment;
-          _persistedLastSegmentLocked = s.lastSegmentLocked;
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('lastSegment', s.lastSegment);
-          await prefs.setBool('lastSegmentLocked', s.lastSegmentLocked);
-          if (mounted) setState(() {});
-        }
-      }
-    }, onError: (e) => setState(() => _error = 'Error: $e'));
+    _statusSub = DashcamPlatformBridge.watchStatus().listen((s) => setState(() { _status = s; _error = ''; }), onError: (e) => setState(() => _error = 'Error: $e'));
   }
 
   Future<void> _loadInitData() async {
     final prefs = await SharedPreferences.getInstance();
     _isFrontCamera = prefs.getBool('isFrontCamera') ?? false;
-    _persistedLastSegment = prefs.getString('lastSegment') ?? '-';
-    _persistedLastSegmentLocked = prefs.getBool('lastSegmentLocked') ?? false;
     await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
     final info = await PackageInfo.fromPlatform();
-    setState(() => _appVersion = 'version ${info.version}');
+    setState(() => _appVersion = 'versione ${info.version}');
   }
   
   Future<void> _toggleCamera() async {
@@ -189,9 +173,9 @@ class _DashcamHomePageState extends State<DashcamHomePage> {
               const SizedBox(height: 40),
               Row(
                 children: [
-                   _buildStatCard('Free Storage', '${_status.freeStorageMb} MB', Icons.storage_rounded),
+                   _buildStatCard('Storage Libero', '${_status.freeStorageMb} MB', Icons.storage_rounded),
                   const SizedBox(width: 16),
-                  _buildStatCard('Last Clip', (_status.lastSegment == '-' ? _persistedLastSegment : _status.lastSegment) == '-' ? 'None' : (_status.lastSegment == '-' ? _persistedLastSegment : _status.lastSegment), Icons.video_file_rounded, trailing: (_status.lastSegment == '-' ? _persistedLastSegmentLocked : _status.lastSegmentLocked) ? const Icon(Icons.shield, color: Colors.orange, size: 16) : null),
+                  _buildStatCard('Last Clip', _status.lastSegment == '-' ? 'None' : _status.lastSegment, Icons.video_file_rounded, trailing: _status.lastSegmentLocked ? const Icon(Icons.shield, color: Colors.orange, size: 16) : null),
                 ],
               ),
               if (_status.warning.isNotEmpty) ...[
@@ -216,11 +200,11 @@ class _DashcamHomePageState extends State<DashcamHomePage> {
               if (_error.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 16.0), child: Text(_error, textAlign: TextAlign.center, style: const TextStyle(color: Colors.redAccent))),
               const Spacer(),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onTap: () => _toggleCamera(), child: Padding(padding: const EdgeInsets.all(16.0), child: Column(children: [Icon(_isFrontCamera ? Icons.camera_front_rounded : Icons.camera_rear_rounded, color: isRec ? Colors.white30 : Colors.white, size: 28), const SizedBox(height: 8), Text('Lens', style: TextStyle(color: isRec ? Colors.white30 : Colors.white, fontWeight: FontWeight.bold))])))),
-                  Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onTap: isRec ? _lockIncident : null, child: Padding(padding: const EdgeInsets.all(16.0), child: Column(children: [Icon(Icons.lock_rounded, color: isRec ? Colors.white : Colors.white30, size: 28), const SizedBox(height: 8), Text('Lock Clip', style: TextStyle(color: isRec ? Colors.white : Colors.white30, fontWeight: FontWeight.bold))])))),
-                  Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onTap: () async { try { await DashcamPlatformBridge.openVideoFolder(); } catch(e) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossibile aprire la galleria videos'))); } }, child: const Padding(padding: EdgeInsets.all(16.0), child: Column(children: [Icon(Icons.video_library_rounded, color: Colors.white, size: 28), SizedBox(height: 8), Text('Gallery', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))])))),
+                  Expanded(child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onTap: () => _toggleCamera(), child: Padding(padding: const EdgeInsets.all(16.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(_isFrontCamera ? Icons.camera_front_rounded : Icons.camera_rear_rounded, color: isRec ? Colors.white30 : Colors.white, size: 28), const SizedBox(height: 8), Text('Lens', style: TextStyle(color: isRec ? Colors.white30 : Colors.white, fontWeight: FontWeight.bold))]))))),
+                  Expanded(child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onTap: isRec ? _lockIncident : null, child: Padding(padding: const EdgeInsets.all(16.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.lock_rounded, color: isRec ? Colors.white : Colors.white30, size: 28), const SizedBox(height: 8), Text('Lock Clip', style: TextStyle(color: isRec ? Colors.white : Colors.white30, fontWeight: FontWeight.bold))]))))),
+                  Expanded(child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onTap: () async { try { await DashcamPlatformBridge.openVideoFolder(); } catch(e) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossibile aprire la galleria videos'))); } }, child: const Padding(padding: EdgeInsets.all(16.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.video_library_rounded, color: Colors.white, size: 28), SizedBox(height: 8), Text('Gallery', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]))))),
                 ],
               ),
               const SizedBox(height: 16),
