@@ -1,19 +1,53 @@
 # Dashcam
 
-## About
+A powerful and lightweight mobile application that transforms your smartphone into a fully functional, reliable dashcam. Built with **Flutter** for a sleek, modern UI, and powered by native **Kotlin & CameraX** on Android for highly efficient background video recording.
 
-The point is straightforward: you don't need a dashcam if you have a mobile phone.
+## 🌟 Why Dashcam?
 
-## Installation
+The concept is straightforward: you don't need a dedicated, expensive hardware dashcam when your mobile phone is more than capable. Just mount your phone on your dashboard, hit record, and drive safely.
 
-If you are familiar with these things
+## ✨ Features
+
+- **Continuous Background Recording:** The app records uninterrupted video segments in the background, even if you switch apps or turn off the screen.
+- **Smart Loop Recording:** Monitors your device's actual free storage space. When space runs out, the app automatically deletes the oldest, unlocked video segments to make room for new ones.
+- **Incident Locking:** Did something happen on the road? Tap the **Lock** button, and the current clip will be permanently saved and protected from auto-deletion.
+- **Front & Back Camera Toggle:** Easily switch between the rear camera for the road and the front camera for the cabin interior.
+- **Real-Time Dashboard:** View live stats including elapsed recording time, available device storage, and the status (and name) of your most recently recorded clip.
+- **Persistent State:** Essential states like your last recorded clip are saved, so they persist even after app restarts.
+
+## 📸 Preview
+
+<img src="./assets/home.jpg" alt="Preview" width="300" />
+
+## 🚀 Installation
+
+### Prerequisites
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) installed.
+- Android Studio & Android SDK (for native building).
+
+### Build from source
+
+If you're familiar with the command line:
 
 ```bash
-git clone
-cd dashcam
+# Clone the repository
+git clone https://github.com/Starry03/dashcam.git
+cd dashcam/app
+
+# Get Flutter dependencies
 flutter pub get
-flutter build <platform>
+
+# Build the Android APK
+flutter build apk
+
+# Install to your connected device
 flutter install
 ```
 
-Otherwise check the release page for the latest version and install it from there.
+### Direct Download
+Otherwise, check the **Releases** page on this repository for the latest version and download the `.apk` directly to your phone.
+
+## In progress...
+
+- [ ] iOS support (currently Android-only due to native CameraX integration).
+- [ ] Cloud backup options for recorded clips.
