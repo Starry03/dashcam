@@ -11,7 +11,7 @@ APP UPDATE: the app provides a fast way to update itself, it makes a request to 
 ## Current Status
 
 - Platform: Android (primary)
-- App version: 1.1.0
+- App version: 1.2.0
 - Core stack: Flutter UI + native CameraX foreground service
 
 ## Features
