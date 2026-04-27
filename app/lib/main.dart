@@ -34,6 +34,7 @@ class DashcamApp extends StatelessWidget {
 class DashcamStatus {
   const DashcamStatus({
     required this.isRecording,
+    required this.isPaused,
     required this.elapsedSeconds,
     required this.storageUsedMb,
     required this.freeStorageMb,
@@ -44,6 +45,7 @@ class DashcamStatus {
   });
 
   final bool isRecording;
+  final bool isPaused;
   final int elapsedSeconds;
   final int storageUsedMb;
   final int freeStorageMb;
@@ -55,6 +57,7 @@ class DashcamStatus {
   factory DashcamStatus.fromMap(Map<Object?, Object?> map) {
     return DashcamStatus(
       isRecording: map['isRecording'] as bool? ?? false,
+      isPaused: map['isPaused'] as bool? ?? false,
       elapsedSeconds: map['elapsedSeconds'] as int? ?? 0,
       storageUsedMb: map['storageUsedMb'] as int? ?? 0,
       freeStorageMb: map['freeStorageMb'] as int? ?? 0,
@@ -67,6 +70,7 @@ class DashcamStatus {
 
   static const idle = DashcamStatus(
     isRecording: false,
+    isPaused: false,
     elapsedSeconds: 0,
     storageUsedMb: 0,
     freeStorageMb: 0,
@@ -86,11 +90,18 @@ class DashcamPlatformBridge {
   static Future<void> startRecording() =>
       _methods.invokeMethod('startRecording');
   static Future<void> stopRecording() => _methods.invokeMethod('stopRecording');
+  static Future<void> pauseRecording() =>
+      _methods.invokeMethod('pauseRecording');
+  static Future<void> resumeRecording() =>
+      _methods.invokeMethod('resumeRecording');
   static Future<void> lockIncident() => _methods.invokeMethod('lockIncident');
   static Future<void> openVideoFolder() =>
       _methods.invokeMethod('openVideoFolder');
   static Future<void> setCameraLens(bool isFront) =>
       _methods.invokeMethod('setCameraLens', {'isFrontCamera': isFront});
+  static Future<void> refreshStatus() => _methods.invokeMethod('refreshStatus');
+  static Future<void> updateLiveStats(double speedKmh) =>
+      _methods.invokeMethod('updateLiveStats', {'speedKmh': speedKmh});
 }
 
 class DashcamHomePage extends StatefulWidget {
@@ -105,15 +116,19 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     with WidgetsBindingObserver {
   late final StreamSubscription<DashcamStatus> _statusSub;
   StreamSubscription<Position>? _speedSub;
+  Timer? _statusRefreshTimer;
   DashcamStatus _status = DashcamStatus.idle;
   String _error = '';
   bool _busy = false;
-  String _appVersion = 'Caricamento...';
+  String _appVersion = 'Loading...';
   bool _isFrontCamera = false;
   double _speedKmh = 0;
+  double _lastNativeSpeedKmh = -1;
+  DateTime? _lastNativeSpeedPushAt;
   Position? _lastReliablePosition;
   DateTime? _lastReliableTimestamp;
   GpsUiStatus _gpsUiStatus = GpsUiStatus.checking;
+  AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
 
   @override
   void initState() {
@@ -121,13 +136,21 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     WidgetsBinding.instance.addObserver(this);
     _loadInitData();
     _initSpeedTracking();
-    _statusSub = DashcamPlatformBridge.watchStatus().listen(
-      (s) => setState(() {
+    _startStatusRefreshTicker();
+    _statusSub = DashcamPlatformBridge.watchStatus().listen((s) {
+      final recordingStateChanged = s.isRecording != _status.isRecording;
+      setState(() {
         _status = s;
         _error = '';
-      }),
-      onError: (e) => setState(() => _error = 'Error: $e'),
-    );
+      });
+      if (recordingStateChanged) {
+        if (_shouldTrackGps) {
+          unawaited(_initSpeedTracking(showMessages: false));
+        } else {
+          _stopSpeedTracking();
+        }
+      }
+    }, onError: (e) => setState(() => _error = 'Error: $e'));
   }
 
   Future<void> _loadInitData() async {
@@ -135,14 +158,14 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     _isFrontCamera = prefs.getBool('isFrontCamera') ?? false;
     await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
     final info = await PackageInfo.fromPlatform();
-    setState(() => _appVersion = 'versione ${info.version}');
+    setState(() => _appVersion = 'version ${info.version}');
   }
 
   Future<void> _toggleCamera() async {
     if (_status.isRecording || _busy) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Stoppa la registrazione per cambiare fotocamera'),
+          content: Text('Stop recording to change camera lens'),
         ),
       );
       return;
@@ -157,18 +180,49 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _speedSub?.cancel();
+    _statusRefreshTimer?.cancel();
     _statusSub.cancel();
     super.dispose();
   }
 
+  void _startStatusRefreshTicker() {
+    _statusRefreshTimer?.cancel();
+    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      unawaited(DashcamPlatformBridge.refreshStatus());
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _initSpeedTracking(showMessages: false);
+    _appLifecycleState = state;
+    if (_shouldTrackGps) {
+      unawaited(_initSpeedTracking(showMessages: false));
+    } else {
+      _stopSpeedTracking();
+    }
+  }
+
+  bool get _shouldTrackGps {
+    return _status.isRecording ||
+        _appLifecycleState == AppLifecycleState.resumed;
+  }
+
+  void _stopSpeedTracking() {
+    _speedSub?.cancel();
+    _speedSub = null;
+    if (mounted && !_status.isRecording) {
+      setState(() {
+        _gpsUiStatus = GpsUiStatus.checking;
+      });
     }
   }
 
   Future<void> _initSpeedTracking({bool showMessages = true}) async {
+    if (!_shouldTrackGps) {
+      _stopSpeedTracking();
+      return;
+    }
+
     if (mounted) {
       setState(() => _gpsUiStatus = GpsUiStatus.checking);
     }
@@ -187,7 +241,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Permesso posizione negato: velocita non disponibile.',
+                'Location permission denied: speed unavailable.',
               ),
             ),
           );
@@ -205,10 +259,10 @@ class _DashcamHomePageState extends State<DashcamHomePage>
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
-                'Permesso posizione bloccato: abilitalo nelle impostazioni.',
+                'Location permission blocked: enable it in settings.',
               ),
               action: SnackBarAction(
-                label: 'Impostazioni',
+                label: 'Settings',
                 onPressed: Geolocator.openAppSettings,
               ),
             ),
@@ -227,9 +281,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         if (showMessages) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Attiva il GPS per mostrare la velocita.'),
+              content: const Text('Enable GPS to display speed.'),
               action: SnackBarAction(
-                label: 'Apri GPS',
+                label: 'Open GPS',
                 onPressed: Geolocator.openLocationSettings,
               ),
             ),
@@ -239,9 +293,11 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       return;
     }
 
-    const settings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 0,
+    final settings = LocationSettings(
+      accuracy: _status.isRecording
+          ? LocationAccuracy.bestForNavigation
+          : LocationAccuracy.high,
+      distanceFilter: _status.isRecording ? 0 : 3,
     );
 
     _speedSub?.cancel();
@@ -249,10 +305,12 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       _handlePositionUpdate,
       onError: (Object e) {
         if (!mounted) return;
-        setState(() => _gpsUiStatus = GpsUiStatus.weakSignal);
+        if (_gpsUiStatus != GpsUiStatus.weakSignal) {
+          setState(() => _gpsUiStatus = GpsUiStatus.weakSignal);
+        }
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Errore GPS: $e')));
+        ).showSnackBar(SnackBar(content: Text('GPS error: $e')));
       },
     );
   }
@@ -261,7 +319,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     // Keep only reliable samples to avoid speed spikes from noisy GPS readings.
     if (position.accuracy > 35) {
       if (mounted) {
-        setState(() => _gpsUiStatus = GpsUiStatus.weakSignal);
+        if (_gpsUiStatus != GpsUiStatus.weakSignal) {
+          setState(() => _gpsUiStatus = GpsUiStatus.weakSignal);
+        }
       }
       return;
     }
@@ -271,7 +331,8 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
     final nativeSpeedValid =
         position.speed >= 0 &&
-        (!position.speedAccuracy.isFinite || position.speedAccuracy <= 3.0);
+        position.speed <= 70 &&
+        (!position.speedAccuracy.isFinite || position.speedAccuracy <= 8.0);
 
     if (nativeSpeedValid) {
       speedMps = position.speed;
@@ -279,7 +340,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         _lastReliableTimestamp != null) {
       final deltaSeconds =
           now.difference(_lastReliableTimestamp!).inMilliseconds / 1000;
-      if (deltaSeconds > 0.8) {
+      if (deltaSeconds > 0.35) {
         final distanceMeters = Geolocator.distanceBetween(
           _lastReliablePosition!.latitude,
           _lastReliablePosition!.longitude,
@@ -288,7 +349,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         );
 
         // Ignore impossible jumps to keep fallback speed reliable.
-        if (distanceMeters <= 120) {
+        if (distanceMeters <= 90) {
           speedMps = distanceMeters / deltaSeconds;
         }
       }
@@ -298,16 +359,37 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       return;
     }
 
-    final speedKmh = math.max(0, math.min(250, speedMps * 3.6));
-    final smoothedKmh = (_speedKmh * 0.75) + (speedKmh * 0.25);
+    final speedKmh = math.max(0.0, math.min(250.0, speedMps * 3.6)).toDouble();
+    final double smoothingAlpha = speedKmh < 15 ? 0.55 : 0.40;
+    final double smoothedKmh =
+        (_speedKmh * (1 - smoothingAlpha)) + (speedKmh * smoothingAlpha);
+    final double liveSpeedKmh = smoothedKmh < 1 ? 0.0 : smoothedKmh;
+
+    _lastReliablePosition = position;
+    _lastReliableTimestamp = now;
 
     if (!mounted) return;
-    setState(() {
-      _gpsUiStatus = GpsUiStatus.active;
-      _speedKmh = smoothedKmh < 1 ? 0 : smoothedKmh;
-      _lastReliablePosition = position;
-      _lastReliableTimestamp = now;
-    });
+    final shouldRefreshUi =
+        _gpsUiStatus != GpsUiStatus.active ||
+        (_speedKmh - liveSpeedKmh).abs() >= 0.2;
+    if (shouldRefreshUi) {
+      setState(() {
+        _gpsUiStatus = GpsUiStatus.active;
+        _speedKmh = liveSpeedKmh;
+      });
+    }
+
+    final nowForPush = DateTime.now();
+    final reachedPushInterval =
+        _lastNativeSpeedPushAt == null ||
+        nowForPush.difference(_lastNativeSpeedPushAt!).inMilliseconds >= 1000;
+    final changedEnoughForPush =
+        (_lastNativeSpeedKmh - liveSpeedKmh).abs() >= 0.7;
+    if (reachedPushInterval || changedEnoughForPush) {
+      _lastNativeSpeedKmh = liveSpeedKmh;
+      _lastNativeSpeedPushAt = nowForPush;
+      unawaited(DashcamPlatformBridge.updateLiveStats(liveSpeedKmh));
+    }
   }
 
   ({String label, Color color, IconData icon}) _gpsStatusStyle() {
@@ -320,19 +402,19 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         );
       case GpsUiStatus.weakSignal:
         return (
-          label: 'GPS debole',
+          label: 'Weak GPS',
           color: Colors.orange.shade200,
           icon: Icons.gps_not_fixed_rounded,
         );
       case GpsUiStatus.permissionDenied:
         return (
-          label: 'GPS non autorizzato',
+          label: 'GPS not allowed',
           color: Colors.red.shade200,
           icon: Icons.location_disabled_rounded,
         );
       case GpsUiStatus.gpsDisabled:
         return (
-          label: 'GPS spento',
+          label: 'GPS off',
           color: Colors.red.shade200,
           icon: Icons.gps_off_rounded,
         );
@@ -356,6 +438,25 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         await DashcamPlatformBridge.stopRecording();
       else
         await DashcamPlatformBridge.startRecording();
+    } on PlatformException catch (e) {
+      setState(() => _error = e.message ?? 'Platform error: ${e.code}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _togglePause() async {
+    if (_busy || !_status.isRecording) return;
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    try {
+      if (_status.isPaused) {
+        await DashcamPlatformBridge.resumeRecording();
+      } else {
+        await DashcamPlatformBridge.pauseRecording();
+      }
     } on PlatformException catch (e) {
       setState(() => _error = e.message ?? 'Platform error: ${e.code}');
     } finally {
@@ -435,9 +536,112 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     );
   }
 
+  Future<void> _openQuickActionsSheet() async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1D1D1D),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    _isFrontCamera
+                        ? Icons.camera_front_rounded
+                        : Icons.camera_rear_rounded,
+                    color: _status.isRecording ? Colors.white38 : Colors.white,
+                  ),
+                  title: const Text('Switch Lens'),
+                  subtitle: Text(
+                    _isFrontCamera ? 'Front' : 'Rear',
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                  enabled: !_status.isRecording,
+                  onTap: _status.isRecording
+                      ? null
+                      : () async {
+                          Navigator.of(context).pop();
+                          await _toggleCamera();
+                        },
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.lock_rounded,
+                    color: _status.isRecording ? Colors.white : Colors.white38,
+                  ),
+                  title: const Text('Lock Current Clip'),
+                  subtitle: Text(
+                    _status.isRecording
+                        ? 'Protects the active segment'
+                        : 'Available only while recording',
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                  enabled: _status.isRecording,
+                  onTap: _status.isRecording
+                      ? () async {
+                          Navigator.of(sheetContext).pop();
+                          await _lockIncident();
+                        }
+                      : null,
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.video_library_rounded,
+                    color: Colors.white,
+                  ),
+                  title: const Text('Open Gallery'),
+                  subtitle: const Text(
+                    'Saved clips',
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.of(sheetContext).pop();
+                    try {
+                      await DashcamPlatformBridge.openVideoFolder();
+                    } catch (e) {
+                      if (!mounted) return;
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Unable to open video gallery',
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isRec = _status.isRecording;
+    final bool isPaused = _status.isPaused;
     final gpsStyle = _gpsStatusStyle();
     return Scaffold(
       body: SafeArea(
@@ -456,9 +660,11 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    isRec ? 'RECORDING' : 'READY',
+                    isRec ? (isPaused ? 'PAUSED' : 'RECORDING') : 'READY',
                     style: TextStyle(
-                      color: isRec ? Colors.redAccent : Colors.grey,
+                      color: isRec
+                          ? (isPaused ? Colors.orangeAccent : Colors.redAccent)
+                          : Colors.grey,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
                     ),
@@ -495,7 +701,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                     ),
                     const SizedBox(width: 10),
                     Text(
-                      '${_speedKmh.toStringAsFixed(0)} km/h',
+                      '${_speedKmh.toStringAsFixed(1)} km/h',
                       style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w700,
@@ -528,7 +734,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
               Row(
                 children: [
                   _buildStatCard(
-                    'Storage Libero',
+                    'Free Storage',
                     '${_status.freeStorageMb} MB',
                     Icons.storage_rounded,
                   ),
@@ -621,108 +827,40 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () => _toggleCamera(),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _isFrontCamera
-                                    ? Icons.camera_front_rounded
-                                    : Icons.camera_rear_rounded,
-                                color: isRec ? Colors.white30 : Colors.white,
-                                size: 28,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Lens',
-                                style: TextStyle(
-                                  color: isRec ? Colors.white30 : Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
+                    child: FilledButton.icon(
+                      onPressed: isRec ? _togglePause : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isRec
+                            ? (isPaused ? Colors.green : Colors.orange)
+                            : Colors.white24,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
+                      icon: Icon(
+                        isPaused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                      ),
+                      label: Text(isPaused ? 'Resume' : 'Pause'),
                     ),
                   ),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: isRec ? _lockIncident : null,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.lock_rounded,
-                                color: isRec ? Colors.white : Colors.white30,
-                                size: 28,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Lock Clip',
-                                style: TextStyle(
-                                  color: isRec ? Colors.white : Colors.white30,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
+                    child: OutlinedButton.icon(
+                      onPressed: _openQuickActionsSheet,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: BorderSide(color: Colors.white.withAlpha(70)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () async {
-                          try {
-                            await DashcamPlatformBridge.openVideoFolder();
-                          } catch (e) {
-                            if (context.mounted)
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Impossibile aprire la galleria videos',
-                                  ),
-                                ),
-                              );
-                          }
-                        },
-                        child: const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.video_library_rounded,
-                                color: Colors.white,
-                                size: 28,
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                'Gallery',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      icon: const Icon(Icons.tune_rounded),
+                      label: const Text('More'),
                     ),
                   ),
                 ],

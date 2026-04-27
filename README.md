@@ -1,53 +1,93 @@
 # Dashcam
 
-A powerful and lightweight mobile application that transforms your smartphone into a fully functional, reliable dashcam. Built with **Flutter** for a sleek, modern UI, and powered by native **Kotlin & CameraX** on Android for highly efficient background video recording.
+Dashcam is a Flutter + Android (Kotlin/CameraX) app that turns your phone into a practical in-car dashcam with foreground recording, loop management, and quick controls.
 
-## 🌟 Why Dashcam?
+## Current Status
 
-The concept is straightforward: you don't need a dedicated, expensive hardware dashcam when your mobile phone is more than capable. Just mount your phone on your dashboard, hit record, and drive safely.
+- Platform: Android (primary)
+- App version: 1.1.0
+- Core stack: Flutter UI + native CameraX foreground service
 
-## ✨ Features
+## Features
 
-- **Continuous Background Recording:** The app records uninterrupted video segments in the background, even if you switch apps or turn off the screen.
-- **Smart Loop Recording:** Monitors your device's actual free storage space. When space runs out, the app automatically deletes the oldest, unlocked video segments to make room for new ones.
-- **Incident Locking:** Did something happen on the road? Tap the **Lock** button, and the current clip will be permanently saved and protected from auto-deletion.
-- **Front & Back Camera Toggle:** Easily switch between the rear camera for the road and the front camera for the cabin interior.
-- **Real-Time Dashboard:** View live stats including elapsed recording time, available device storage, and the status (and name) of your most recently recorded clip.
-- **Persistent State:** Essential states like your last recorded clip are saved, so they persist even after app restarts.
+- Continuous segmented recording in a foreground service
+- Pause, resume, and stop recording (in app and notification controls)
+- Quick incident lock for current segment
+- Loop cleanup of oldest unlocked clips when space is low
+- Live dashboard with:
+	- recording timer
+	- speed (GPS based)
+	- free storage
+	- latest clip status
+- Low storage alert when remaining space is <= 5 GB
+- Recording started notification
+- Camera lens toggle (front/rear)
 
-## 📸 Preview
+## Notification Controls
 
-<img src="./assets/home.jpg" alt="Preview" width="300" />
+Foreground notification provides quick actions without reopening the app:
 
-## 🚀 Installation
+- Pause / Resume
+- Stop
+- Timer + current speed shown in notification text
 
-### Prerequisites
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) installed.
-- Android Studio & Android SDK (for native building).
+## Battery and Efficiency Notes
 
-### Build from source
+Recent optimizations included:
 
-If you're familiar with the command line:
+- GPS tracking suspended when app is in background and recording is not active
+
+## Project Structure
+
+- `app/lib/main.dart`: main Flutter UI and app flow
+- `app/android/app/src/main/kotlin/com/example/app/MainActivity.kt`: method/event channels
+- `app/android/app/src/main/kotlin/com/example/app/DashcamForegroundService.kt`: CameraX recording service
+- `app/android/app/src/main/kotlin/com/example/app/DashcamStatusStore.kt`: shared runtime state + alerts
+
+## Getting Started
+
+### Requirements
+
+- Flutter SDK
+- Android SDK / Android Studio
+- Physical Android device recommended for camera and GPS testing
+
+### Run in debug
 
 ```bash
-# Clone the repository
 git clone https://github.com/Starry03/dashcam.git
 cd dashcam/app
-
-# Get Flutter dependencies
 flutter pub get
-
-# Build the Android APK
-flutter build apk
-
-# Install to your connected device
-flutter install
+flutter run
 ```
 
-### Direct Download
-Otherwise, check the **Releases** page on this repository for the latest version and download the `.apk` directly to your phone.
+### Build APK
 
-## In progress...
+```bash
+cd app
+flutter pub get
+flutter build apk
+```
 
-- [ ] iOS support (currently Android-only due to native CameraX integration).
-- [ ] Cloud backup options for recorded clips.
+## Permissions
+
+The Android app uses:
+
+- Camera
+- Microphone
+- Fine/coarse location
+- Foreground service permissions
+- Notifications (Android 13+)
+
+## Preview
+
+<p>
+	<img src="./assets/home.jpg" alt="Home screen" width="300" />
+	<img src="./assets/notify.jpg" alt="Notification controls screen" width="300" />
+</p>
+
+## Roadmap
+
+- Improve storage policy settings from UI
+- Better analytics and crash diagnostics
+- iOS parity where platform constraints allow

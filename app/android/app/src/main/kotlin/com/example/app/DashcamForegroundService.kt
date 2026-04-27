@@ -3,6 +3,7 @@ package com.example.app
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.pm.PackageManager
@@ -40,6 +41,7 @@ class DashcamForegroundService : LifecycleService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var elapsedSeconds = 0
     private var running = false
+    private var paused = false
     private var usedMb = 0
     private var rollingToNextSegment = false
     private var currentSegmentLocked = false
@@ -66,9 +68,11 @@ class DashcamForegroundService : LifecycleService() {
             if (!running) {
                 return
             }
-            elapsedSeconds += 1
-            DashcamStatusStore.onTick(elapsedSeconds, this@DashcamForegroundService)
-            updateNotification()
+            if (!paused) {
+                elapsedSeconds += 1
+                DashcamStatusStore.onTick(elapsedSeconds, this@DashcamForegroundService)
+                updateNotification()
+            }
             mainHandler.postDelayed(this, 1000)
         }
     }
@@ -78,7 +82,9 @@ class DashcamForegroundService : LifecycleService() {
             if (!running) {
                 return
             }
-            rollToNextSegment()
+            if (!paused) {
+                rollToNextSegment()
+            }
             mainHandler.postDelayed(this, SEGMENT_MS)
         }
     }
@@ -88,6 +94,10 @@ class DashcamForegroundService : LifecycleService() {
         when (intent?.action) {
             ACTION_START -> startRecordingLoop()
             ACTION_STOP -> stopRecordingLoop()
+            ACTION_PAUSE -> pauseRecordingLoop()
+            ACTION_RESUME -> resumeRecordingLoop()
+            ACTION_TOGGLE -> if (running) stopRecordingLoop() else startRecordingLoop()
+            ACTION_REFRESH_NOTIFICATION -> if (running) updateNotification()
             ACTION_LOCK_INCIDENT -> lockCurrentOrLatestSegment()
         }
         return START_STICKY
@@ -108,7 +118,10 @@ class DashcamForegroundService : LifecycleService() {
         ensureNotificationChannel()
         loadExistingSegments()
         running = true
+        paused = false
         startForeground(NOTIFICATION_ID, buildNotification())
+        DashcamStatusStore.notifyRecordingStarted(this)
+        DashcamStatusStore.resumeRecording(this)
         bindCameraAndStartRecording()
         mainHandler.postDelayed(ticker, 1000)
         mainHandler.postDelayed(segmentRollover, SEGMENT_MS)
@@ -117,6 +130,7 @@ class DashcamForegroundService : LifecycleService() {
     private fun stopRecordingLoop() {
         if (!running && currentRecording == null) return
         running = false
+        paused = false
         pendingServiceStop = true
         rollingToNextSegment = false
         mainHandler.removeCallbacks(ticker)
@@ -229,7 +243,7 @@ class DashcamForegroundService : LifecycleService() {
         currentRecording = null
 
         if (event.hasError()) {
-            DashcamStatusStore.onWarning("Errore salvataggio clip: ${event.cause?.message ?: event.error}", this)
+            DashcamStatusStore.onWarning("Clip save error: ${event.cause?.message ?: event.error}", this)
         }
 
         val sizeMb = when {
@@ -274,7 +288,35 @@ class DashcamForegroundService : LifecycleService() {
         currentRecording?.stop()
     }
 
+    private fun pauseRecordingLoop() {
+        if (!running || paused || currentRecording == null) return
+        try {
+            currentRecording?.pause()
+            paused = true
+            DashcamStatusStore.pauseRecording(this)
+            updateNotification()
+        } catch (t: Throwable) {
+            DashcamStatusStore.onWarning("Pause error: ${t.message ?: "unknown"}", this)
+        }
+    }
+
+    private fun resumeRecordingLoop() {
+        if (!running || !paused || currentRecording == null) return
+        try {
+            currentRecording?.resume()
+            paused = false
+            DashcamStatusStore.resumeRecording(this)
+            updateNotification()
+        } catch (t: Throwable) {
+            DashcamStatusStore.onWarning("Resume error: ${t.message ?: "unknown"}", this)
+        }
+    }
+
     private fun lockCurrentOrLatestSegment() {
+        if (paused) {
+            DashcamStatusStore.onWarning("Resume recording before locking the current segment.", this)
+            return
+        }
         if (currentRecording != null) {
             currentSegmentLocked = true
             DashcamStatusStore.onWarning("Incident marker will lock the current segment.", this)
@@ -426,26 +468,69 @@ class DashcamForegroundService : LifecycleService() {
         val hours = elapsedSeconds / 3600
         val mins = (elapsedSeconds % 3600) / 60
         val secs = elapsedSeconds % 60
+        val speedKmh = DashcamStatusStore.getLiveSpeedKmh()
         val subtitle = String.format(
             Locale.US,
-            "%02d:%02d:%02d • %d MB used",
+            "%02d:%02d:%02d • %.1f km/h",
             hours,
             mins,
             secs,
-            usedMb
+            speedKmh
         )
+
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            this,
+            4201,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val pauseResumeIntent = Intent(this, DashcamForegroundService::class.java).apply {
+            action = if (paused) ACTION_RESUME else ACTION_PAUSE
+        }
+        val pauseResumePendingIntent = PendingIntent.getService(
+            this,
+            4202,
+            pauseResumeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val stopIntent = Intent(this, DashcamForegroundService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            4203,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val pauseResumeLabel = if (paused) "Resume" else "Pause"
+        val pauseResumeIcon =
+            if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Dashcam recording")
+            .setContentTitle(if (paused) "Dashcam paused" else "Dashcam")
             .setContentText(subtitle)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setContentIntent(openAppPendingIntent)
+            .addAction(pauseResumeIcon, pauseResumeLabel, pauseResumePendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
             .build()
     }
 
     companion object {
         const val ACTION_START = "dashcam.action.START"
         const val ACTION_STOP = "dashcam.action.STOP"
+        const val ACTION_PAUSE = "dashcam.action.PAUSE"
+        const val ACTION_RESUME = "dashcam.action.RESUME"
+        const val ACTION_TOGGLE = "dashcam.action.TOGGLE"
+        const val ACTION_REFRESH_NOTIFICATION = "dashcam.action.REFRESH_NOTIFICATION"
         const val ACTION_LOCK_INCIDENT = "dashcam.action.LOCK"
 
         private const val CHANNEL_ID = "dashcam_recording"

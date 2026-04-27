@@ -3,6 +3,7 @@ package com.example.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -29,6 +30,20 @@ class MainActivity : FlutterActivity() {
                         DashcamStatusStore.stopRecording(this)
                         result.success(null)
                     }
+                    "pauseRecording" -> {
+                        val intent = Intent(this, DashcamForegroundService::class.java).apply {
+                            action = DashcamForegroundService.ACTION_PAUSE
+                        }
+                        startService(intent)
+                        result.success(null)
+                    }
+                    "resumeRecording" -> {
+                        val intent = Intent(this, DashcamForegroundService::class.java).apply {
+                            action = DashcamForegroundService.ACTION_RESUME
+                        }
+                        startService(intent)
+                        result.success(null)
+                    }
                     "lockIncident" -> {
                         DashcamStatusStore.lockIncident(this)
                         result.success(null)
@@ -36,6 +51,15 @@ class MainActivity : FlutterActivity() {
                     "setCameraLens" -> {
                         val isFront = call.argument<Boolean>("isFrontCamera") ?: false
                         DashcamStatusStore.setCameraLens(isFront, this)
+                        result.success(null)
+                    }
+                    "refreshStatus" -> {
+                        DashcamStatusStore.emitCurrent(this)
+                        result.success(null)
+                    }
+                    "updateLiveStats" -> {
+                        val speedKmh = call.argument<Double>("speedKmh") ?: 0.0
+                        DashcamStatusStore.updateLiveSpeed(speedKmh)
                         result.success(null)
                     }
                     "openVideoFolder" -> {
@@ -53,7 +77,7 @@ class MainActivity : FlutterActivity() {
                                 startActivity(fallbackIntent)
                                 result.success(null)
                             } catch(e2: Exception) {
-                                result.error("ERROR", "Nessuna app compatibile", null)
+                                result.error("ERROR", "No compatible app found", null)
                             }
                         }
                     }
@@ -79,15 +103,21 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun ensurePermissions() {
-        val needed = listOf(
+        val needed = mutableListOf(
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO
-        ).filter { permission ->
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val missing = needed.filter { permission ->
             ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
         }
 
-        if (needed.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1001)
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
         }
     }
 }
