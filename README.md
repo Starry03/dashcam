@@ -21,10 +21,10 @@ APP UPDATE: the app provides a fast way to update itself, it makes a request to 
 - Quick incident lock for current segment
 - Loop cleanup of oldest unlocked clips when space is low
 - Live dashboard with:
-	- recording timer
-	- speed (GPS based)
-	- free storage
-	- latest clip status
+  - recording timer
+  - speed (GPS based)
+  - free storage
+  - latest clip status
 - Low storage alert when remaining space is <= 5 GB
 - Recording started notification
 - Camera lens toggle (front/rear)
@@ -87,10 +87,8 @@ The Android app uses:
 
 ## Preview
 
-<p>
-	<img src="./assets/home.jpg" alt="Home screen" width="300" />
-	<img src="./assets/notify.jpg" alt="Notification controls screen" width="300" />
-</p>
+![Home screen](./assets/home.jpg)
+![Notification controls screen](./assets/notify.jpg)
 
 ## Roadmap
 
