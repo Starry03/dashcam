@@ -6,7 +6,7 @@ Dashcam is a Flutter + Android (Kotlin/CameraX) app that turns your phone into a
 
 Everything is processed locally. No data is sent to any servers. Clips are stored on-device and can be accessed via the app or file explorer. The app does not collect any personal information or usage data.
 
-APP UPDATE: the app will provide a fast way to update itself, there will be a request to github to check for new releases, and if there is a new release, the app will download the latest apk and prompt the user to install it.
+APP UPDATE: the app provides a fast way to update itself, it makes a request to github to check for new releases, and if there is a new release, the app will download the latest version and prompt the user to install it.
 
 ## Current Status
 

@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -104,6 +107,77 @@ class DashcamPlatformBridge {
       _methods.invokeMethod('updateLiveStats', {'speedKmh': speedKmh});
 }
 
+class ReleaseInfo {
+  const ReleaseInfo({
+    required this.version,
+    required this.apkUrl,
+    required this.htmlUrl,
+    required this.tag,
+  });
+
+  final String version;
+  final String apkUrl;
+  final String htmlUrl;
+  final String tag;
+}
+
+class GithubReleaseService {
+  static const String _owner = 'Starry03';
+  static const String _repo = 'dashcam';
+
+  static Future<ReleaseInfo?> fetchLatestRelease() async {
+    final uri = Uri.https(
+      'api.github.com',
+      '/repos/$_owner/$_repo/releases/latest',
+    );
+
+    final response = await http.get(
+      uri,
+      headers: const {'Accept': 'application/vnd.github+json'},
+    );
+
+    if (response.statusCode != 200) return null;
+
+    final dynamic decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) return null;
+
+    final tag = (decoded['tag_name'] as String? ?? '').trim();
+    final htmlUrl = (decoded['html_url'] as String? ?? '').trim();
+    final assets = decoded['assets'];
+
+    String? apkUrl;
+    if (assets is List) {
+      for (final asset in assets) {
+        if (asset is! Map<String, dynamic>) continue;
+        final url = (asset['browser_download_url'] as String? ?? '').trim();
+        if (url.toLowerCase().endsWith('.apk')) {
+          apkUrl = url;
+          break;
+        }
+      }
+    }
+
+    if (tag.isEmpty || htmlUrl.isEmpty || apkUrl == null || apkUrl.isEmpty) {
+      return null;
+    }
+
+    return ReleaseInfo(
+      version: _normalizeVersion(tag),
+      apkUrl: apkUrl,
+      htmlUrl: htmlUrl,
+      tag: tag,
+    );
+  }
+
+  static String _normalizeVersion(String value) {
+    final trimmed = value.trim();
+    if (trimmed.startsWith('v') || trimmed.startsWith('V')) {
+      return trimmed.substring(1);
+    }
+    return trimmed;
+  }
+}
+
 class DashcamHomePage extends StatefulWidget {
   const DashcamHomePage({super.key});
   @override
@@ -121,6 +195,8 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   String _error = '';
   bool _busy = false;
   String _appVersion = 'Loading...';
+  String _installedVersion = '';
+  bool _didCheckUpdates = false;
   bool _isFrontCamera = false;
   double _speedKmh = 0;
   double _lastNativeSpeedKmh = -1;
@@ -158,7 +234,100 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     _isFrontCamera = prefs.getBool('isFrontCamera') ?? false;
     await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
     final info = await PackageInfo.fromPlatform();
+    _installedVersion = info.version;
     setState(() => _appVersion = 'version ${info.version}');
+
+    // Run once after app startup to avoid repeated dialogs on hot states.
+    if (!_didCheckUpdates) {
+      _didCheckUpdates = true;
+      unawaited(_checkForGithubUpdate());
+    }
+  }
+
+  List<int> _parseSemver(String raw) {
+    final clean = raw.trim().replaceFirst(RegExp(r'^[vV]'), '');
+    final main = clean.split('-').first;
+    return main
+        .split('.')
+        .map((part) => int.tryParse(part) ?? 0)
+        .toList(growable: false);
+  }
+
+  bool _isVersionNewer(String candidate, String installed) {
+    final a = _parseSemver(candidate);
+    final b = _parseSemver(installed);
+    final maxLen = math.max(a.length, b.length);
+    for (var i = 0; i < maxLen; i++) {
+      final ai = i < a.length ? a[i] : 0;
+      final bi = i < b.length ? b[i] : 0;
+      if (ai > bi) return true;
+      if (ai < bi) return false;
+    }
+    return false;
+  }
+
+  Future<void> _checkForGithubUpdate() async {
+    if (_installedVersion.isEmpty) return;
+
+    try {
+      final release = await GithubReleaseService.fetchLatestRelease();
+      if (!mounted || release == null) return;
+
+      if (!_isVersionNewer(release.version, _installedVersion)) {
+        return;
+      }
+
+      final shouldUpdate = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Update available'),
+            content: Text(
+              'A new version (${release.tag}) is available on GitHub.\n\nCurrent: $_installedVersion\nLatest: ${release.version}\n\nDo you want to download and install it now?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Later'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Update'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (!mounted) return;
+
+      if (shouldUpdate == true) {
+        final apkUri = Uri.tryParse(release.apkUrl);
+        if (apkUri != null && await canLaunchUrl(apkUri)) {
+          await launchUrl(apkUri, mode: LaunchMode.externalApplication);
+          return;
+        }
+
+        final releaseUri = Uri.tryParse(release.htmlUrl);
+        if (releaseUri != null) {
+          await launchUrl(releaseUri, mode: LaunchMode.externalApplication);
+          return;
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Unable to open the update link.'),
+            ),
+          );
+        }
+        return;
+      }
+
+    } catch (_) {
+      // Silent failure: startup must remain smooth if release API is unavailable.
+    }
   }
 
   Future<void> _toggleCamera() async {
@@ -434,14 +603,17 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       _error = '';
     });
     try {
-      if (_status.isRecording)
+      if (_status.isRecording) {
         await DashcamPlatformBridge.stopRecording();
-      else
+      } else {
         await DashcamPlatformBridge.startRecording();
+      }
     } on PlatformException catch (e) {
       setState(() => _error = e.message ?? 'Platform error: ${e.code}');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -467,15 +639,17 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   Future<void> _lockIncident() async {
     try {
       await DashcamPlatformBridge.lockIncident();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Incident marker saved.')));
+      }
     } on PlatformException catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.message ?? 'Failed.')));
+      }
     }
   }
 
