@@ -1,5 +1,7 @@
 # Security and privacy
 
+General info about how the app handles data, permissions and updates
+
 ## Bugs
 
 If you find anything, please open an issue
