@@ -1,5 +1,7 @@
 # Dashcam
 
+[![Release](https://img.shields.io/github/v/release/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/releases) [![License](https://img.shields.io/github/license/Starry03/dashcam?style=flat-square)](LICENSE) [![Last Commit](https://img.shields.io/github/last-commit/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/commits) [![Issues](https://img.shields.io/github/issues/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/issues) [![Stars](https://img.shields.io/github/stars/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/stargazers)
+
 Dashcam is a Flutter + Android (Kotlin/CameraX) app that turns your phone into a practical in-car dashcam with foreground recording, loop management, and quick controls.
 
 ## Privacy and Data Handling
@@ -43,12 +45,6 @@ Recent optimizations included:
 
 - GPS tracking suspended when app is in background and recording is not active
 
-## Project Structure
-
-- `app/lib/main.dart`: main Flutter UI and app flow
-- `app/android/app/src/main/kotlin/com/example/app/MainActivity.kt`: method/event channels
-- `app/android/app/src/main/kotlin/com/example/app/DashcamForegroundService.kt`: CameraX recording service
-- `app/android/app/src/main/kotlin/com/example/app/DashcamStatusStore.kt`: shared runtime state + alerts
 
 ## Getting Started
 
@@ -87,11 +83,16 @@ The Android app uses:
 
 ## Preview
 
-![Home screen](./assets/home.jpg)
-![Notification controls screen](./assets/notify.jpg)
+<p align="center">
+  <img src="./assets/home.jpg" alt="Home screen" style="max-width:600px; width:100%; height:auto;" />
+</p>
+<p align="center">
+  <img src="./assets/notify.jpg" alt="Notification controls screen" style="max-width:600px; width:100%; height:auto;" />
+</p>
 
 ## Roadmap
 
+- Improve velocity calculation
 - Improve storage policy settings from UI
 - Better analytics and crash diagnostics
 - iOS parity where platform constraints allow
