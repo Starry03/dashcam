@@ -1,7 +1,8 @@
+# env
 .vscode/
 .idea/
 .gitignore
 .air/
 
+# ai
 CLAUDE.md
-mcp.json
