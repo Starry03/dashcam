@@ -186,6 +186,18 @@ class DashcamHomePage extends StatefulWidget {
 
 enum GpsUiStatus { checking, permissionDenied, gpsDisabled, weakSignal, active }
 
+class _GpsSample {
+  const _GpsSample({
+    required this.timestamp,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final DateTime timestamp;
+  final double latitude;
+  final double longitude;
+}
+
 class _DashcamHomePageState extends State<DashcamHomePage>
     with WidgetsBindingObserver {
   late final StreamSubscription<DashcamStatus> _statusSub;
@@ -201,8 +213,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   double _speedKmh = 0;
   double _lastNativeSpeedKmh = -1;
   DateTime? _lastNativeSpeedPushAt;
-  Position? _lastReliablePosition;
-  DateTime? _lastReliableTimestamp;
+  final List<_GpsSample> _speedSamples = <_GpsSample>[];
   GpsUiStatus _gpsUiStatus = GpsUiStatus.checking;
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
 
@@ -317,14 +328,11 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Unable to open the update link.'),
-            ),
+            const SnackBar(content: Text('Unable to open the update link.')),
           );
         }
         return;
       }
-
     } catch (_) {
       // Silent failure: startup must remain smooth if release API is unavailable.
     }
@@ -333,9 +341,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   Future<void> _toggleCamera() async {
     if (_status.isRecording || _busy) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Stop recording to change camera lens'),
-        ),
+        const SnackBar(content: Text('Stop recording to change camera lens')),
       );
       return;
     }
@@ -386,6 +392,53 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     }
   }
 
+  void _recordSpeedSample(Position position, DateTime timestamp) {
+    _speedSamples.add(
+      _GpsSample(
+        timestamp: timestamp,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      ),
+    );
+
+    final cutoff = timestamp.subtract(const Duration(seconds: 5));
+    while (_speedSamples.length > 2 &&
+        _speedSamples.first.timestamp.isBefore(cutoff)) {
+      _speedSamples.removeAt(0);
+    }
+
+    while (_speedSamples.length > 8) {
+      _speedSamples.removeAt(0);
+    }
+  }
+
+  double? _estimateWindowSpeedMps() {
+    if (_speedSamples.length < 2) return null;
+
+    double distanceMeters = 0;
+    for (var index = 1; index < _speedSamples.length; index++) {
+      final previous = _speedSamples[index - 1];
+      final current = _speedSamples[index];
+      distanceMeters += Geolocator.distanceBetween(
+        previous.latitude,
+        previous.longitude,
+        current.latitude,
+        current.longitude,
+      );
+    }
+
+    final elapsedSeconds =
+        _speedSamples.last.timestamp
+            .difference(_speedSamples.first.timestamp)
+            .inMilliseconds /
+        1000;
+    if (elapsedSeconds < 2.0) return null;
+
+    final speedMps = distanceMeters / elapsedSeconds;
+    if (!speedMps.isFinite || speedMps > 70) return null;
+    return speedMps;
+  }
+
   Future<void> _initSpeedTracking({bool showMessages = true}) async {
     if (!_shouldTrackGps) {
       _stopSpeedTracking();
@@ -409,9 +462,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         if (showMessages) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Location permission denied: speed unavailable.',
-              ),
+              content: Text('Location permission denied: speed unavailable.'),
             ),
           );
         }
@@ -496,32 +547,19 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     }
 
     final now = position.timestamp;
-    double? speedMps;
+    _recordSpeedSample(position, now);
 
     final nativeSpeedValid =
         position.speed >= 0 &&
         position.speed <= 70 &&
-        (!position.speedAccuracy.isFinite || position.speedAccuracy <= 8.0);
+        (!position.speedAccuracy.isFinite || position.speedAccuracy <= 6.0);
 
-    if (nativeSpeedValid) {
+    final windowSpeedMps = _estimateWindowSpeedMps();
+    double? speedMps;
+    if (nativeSpeedValid && position.speedAccuracy <= 6.0) {
       speedMps = position.speed;
-    } else if (_lastReliablePosition != null &&
-        _lastReliableTimestamp != null) {
-      final deltaSeconds =
-          now.difference(_lastReliableTimestamp!).inMilliseconds / 1000;
-      if (deltaSeconds > 0.35) {
-        final distanceMeters = Geolocator.distanceBetween(
-          _lastReliablePosition!.latitude,
-          _lastReliablePosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-
-        // Ignore impossible jumps to keep fallback speed reliable.
-        if (distanceMeters <= 90) {
-          speedMps = distanceMeters / deltaSeconds;
-        }
-      }
+    } else {
+      speedMps = windowSpeedMps ?? (nativeSpeedValid ? position.speed : null);
     }
 
     if (speedMps == null) {
@@ -529,13 +567,10 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     }
 
     final speedKmh = math.max(0.0, math.min(250.0, speedMps * 3.6)).toDouble();
-    final double smoothingAlpha = speedKmh < 15 ? 0.55 : 0.40;
+    final double smoothingAlpha = speedKmh < 15 ? 0.45 : 0.30;
     final double smoothedKmh =
         (_speedKmh * (1 - smoothingAlpha)) + (speedKmh * smoothingAlpha);
     final double liveSpeedKmh = smoothedKmh < 1 ? 0.0 : smoothedKmh;
-
-    _lastReliablePosition = position;
-    _lastReliableTimestamp = now;
 
     if (!mounted) return;
     final shouldRefreshUi =
@@ -710,6 +745,26 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     );
   }
 
+  Widget _buildWarningBanner(String message) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.withAlpha(38),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.orange.withAlpha(76)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(message, style: const TextStyle(color: Colors.orange)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openQuickActionsSheet() async {
     if (!mounted) return;
     await showModalBottomSheet<void>(
@@ -796,9 +851,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                       if (!mounted) return;
                       messenger.showSnackBar(
                         const SnackBar(
-                          content: Text(
-                            'Unable to open video gallery',
-                          ),
+                          content: Text('Unable to open video gallery'),
                         ),
                       );
                     }
@@ -820,229 +873,220 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     return Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 24.0),
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.fiber_manual_record,
-                    color: isRec ? Colors.redAccent : Colors.grey,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isRec ? (isPaused ? 'PAUSED' : 'RECORDING') : 'READY',
-                    style: TextStyle(
-                      color: isRec
-                          ? (isPaused ? Colors.orangeAccent : Colors.redAccent)
-                          : Colors.grey,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 50),
-              Text(
-                _formatDuration(_status.elapsedSeconds),
-                style: const TextStyle(
-                  fontSize: 64,
-                  fontWeight: FontWeight.w200,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(height: 18),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha(12),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withAlpha(25)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+              SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(0, 0, 0, 124),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const Icon(
-                      Icons.speed_rounded,
-                      color: Colors.white70,
-                      size: 22,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.fiber_manual_record,
+                          color: isRec ? Colors.redAccent : Colors.grey,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isRec ? (isPaused ? 'PAUSED' : 'RECORDING') : 'READY',
+                          style: TextStyle(
+                            color: isRec
+                                ? (isPaused
+                                      ? Colors.orangeAccent
+                                      : Colors.redAccent)
+                                : Colors.grey,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(height: 50),
                     Text(
-                      '${_speedKmh.toStringAsFixed(1)} km/h',
+                      _formatDuration(_status.elapsedSeconds),
                       style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 64,
+                        fontWeight: FontWeight.w200,
+                        fontFamily: 'monospace',
                       ),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-              Opacity(
-                opacity: _gpsUiStatus == GpsUiStatus.active ? 0.72 : 0.9,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(gpsStyle.icon, size: 12, color: gpsStyle.color),
-                    const SizedBox(width: 4),
-                    Text(
-                      gpsStyle.label,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.2,
-                        color: gpsStyle.color,
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 10,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 40),
-              Row(
-                children: [
-                  _buildStatCard(
-                    'Free Storage',
-                    '${_status.freeStorageMb} MB',
-                    Icons.storage_rounded,
-                  ),
-                  const SizedBox(width: 16),
-                  _buildStatCard(
-                    'Last Clip',
-                    _status.lastSegment == '-' ? 'None' : _status.lastSegment,
-                    Icons.video_file_rounded,
-                    trailing: _status.lastSegmentLocked
-                        ? const Icon(
-                            Icons.shield,
-                            color: Colors.orange,
-                            size: 16,
-                          )
-                        : null,
-                  ),
-                ],
-              ),
-              if (_status.warning.isNotEmpty) ...[
-                const SizedBox(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withAlpha(38),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.orange.withAlpha(76)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.warning_amber_rounded,
-                        color: Colors.orange,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _status.warning,
-                          style: const TextStyle(color: Colors.orange),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const Spacer(),
-              GestureDetector(
-                onTap: _busy ? null : _toggleRecording,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isRec ? Colors.transparent : Colors.redAccent,
-                    border: Border.all(color: Colors.redAccent, width: 4),
-                    boxShadow: isRec
-                        ? null
-                        : [
-                            BoxShadow(
-                              color: Colors.redAccent.withAlpha(102),
-                              blurRadius: 20,
-                            ),
-                          ],
-                  ),
-                  child: Center(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: isRec ? 36 : 96,
-                      height: isRec ? 36 : 96,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(isRec ? 8 : 48),
-                        color: Colors.redAccent,
+                        color: Colors.white.withAlpha(12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.white.withAlpha(25)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.speed_rounded,
+                            color: Colors.white70,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '${_speedKmh.toStringAsFixed(1)} km/h',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (_error.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
-                  child: Text(
-                    _error,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.redAccent),
-                  ),
-                ),
-              const Spacer(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: isRec ? _togglePause : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: isRec
-                            ? (isPaused ? Colors.green : Colors.orange)
-                            : Colors.white24,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                    const SizedBox(height: 6),
+                    Opacity(
+                      opacity: _gpsUiStatus == GpsUiStatus.active ? 0.72 : 0.9,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(gpsStyle.icon, size: 12, color: gpsStyle.color),
+                          const SizedBox(width: 4),
+                          Text(
+                            gpsStyle.label,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.2,
+                              color: gpsStyle.color,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                    Row(
+                      children: [
+                        _buildStatCard(
+                          'Free Storage',
+                          '${_status.freeStorageMb} MB',
+                          Icons.storage_rounded,
+                        ),
+                        const SizedBox(width: 16),
+                        _buildStatCard(
+                          'Last Clip',
+                          _status.lastSegment == '-'
+                              ? 'None'
+                              : _status.lastSegment,
+                          Icons.video_file_rounded,
+                          trailing: _status.lastSegmentLocked
+                              ? const Icon(
+                                  Icons.shield,
+                                  color: Colors.orange,
+                                  size: 16,
+                                )
+                              : null,
+                        ),
+                      ],
+                    ),
+                    if (_status.warning.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      _buildWarningBanner(_status.warning),
+                    ],
+                    if (_error.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      _buildWarningBanner(_error),
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _busy ? null : _toggleRecording,
+                            icon: Icon(
+                              isRec
+                                  ? Icons.stop_rounded
+                                  : Icons.fiber_manual_record,
+                            ),
+                            label: Text(isRec ? 'Stop' : 'Start'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isRec
+                                  ? Colors.redAccent
+                                  : Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _busy || !isRec ? null : _togglePause,
+                            icon: Icon(
+                              isPaused
+                                  ? Icons.play_arrow_rounded
+                                  : Icons.pause_rounded,
+                            ),
+                            label: Text(isPaused ? 'Resume' : 'Pause'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orangeAccent,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _busy ? null : _lockIncident,
+                        icon: const Icon(Icons.lock_rounded),
+                        label: const Text('Lock Clip'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white24),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                       ),
-                      icon: Icon(
-                        isPaused
-                            ? Icons.play_arrow_rounded
-                            : Icons.pause_rounded,
-                      ),
-                      label: Text(isPaused ? 'Resume' : 'Pause'),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _openQuickActionsSheet,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: BorderSide(color: Colors.white.withAlpha(70)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _busy ? null : _openQuickActionsSheet,
+                        icon: const Icon(Icons.menu_rounded),
+                        label: const Text('Quick Actions'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white70,
+                          side: const BorderSide(color: Colors.white24),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                       ),
-                      icon: const Icon(Icons.tune_rounded),
-                      label: const Text('More'),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _appVersion,
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    const SizedBox(height: 16),
+                    Text(
+                      _appVersion,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

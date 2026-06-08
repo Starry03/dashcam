@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:app/main.dart';
+import 'package:dashcam/main.dart';
 
 void main() {
   testWidgets('Dashcam UI shows start state', (WidgetTester tester) async {

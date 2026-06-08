@@ -2,6 +2,15 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://repo1.maven.org/maven2/")
+        }
+        maven {
+            url = uri("https://dl.bintray.com/arthenica/ffmpeg-kit")
+        }
+        maven {
+            url = uri("https://artifactory.appodeal.com/appodeal-public/")
+        }
     }
 }
 

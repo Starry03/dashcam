@@ -37,15 +37,27 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
-    val cameraXVersion = "1.3.4"
+    val cameraXVersion = "1.4.0"
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
     implementation("androidx.camera:camera-core:$cameraXVersion")
     implementation("androidx.camera:camera-camera2:$cameraXVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
     implementation("androidx.camera:camera-video:$cameraXVersion")
+    // Local FFmpeg AAR fallback: place `ffmpeg-kit-full-gpl-6.0-2.aar` in `libs/`
+    val ffmpegAar = file("libs/ffmpeg-kit-full-gpl-6.0-2.aar")
+    if (ffmpegAar.exists()) {
+        implementation(files(ffmpegAar))
+        implementation("com.arthenica:smart-exception-java:0.2.1")
+    }
 }
 
 flutter {

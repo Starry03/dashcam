@@ -1,2 +1,7 @@
 .vscode/
 .idea/
+.gitignore
+.air/
+
+CLAUDE.md
+mcp.json

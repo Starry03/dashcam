@@ -36,9 +36,11 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class DashcamForegroundService : LifecycleService() {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val burnInExecutor = Executors.newSingleThreadExecutor()
     private var elapsedSeconds = 0
     private var running = false
     private var paused = false
@@ -46,12 +48,14 @@ class DashcamForegroundService : LifecycleService() {
     private var rollingToNextSegment = false
     private var currentSegmentLocked = false
     private var pendingServiceStop = false
+    private var activeBurnInJobs = 0
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var currentRecording: Recording? = null
     private var currentSegmentFile: File? = null
     private var currentSegmentName: String = ""
+    private val currentSegmentSamples: MutableList<DashcamVideoBurnIn.Sample> = mutableListOf()
 
     private data class SegmentMeta(
         val uri: Uri?,
@@ -70,6 +74,7 @@ class DashcamForegroundService : LifecycleService() {
             }
             if (!paused) {
                 elapsedSeconds += 1
+                captureBurnInSample()
                 DashcamStatusStore.onTick(elapsedSeconds, this@DashcamForegroundService)
                 updateNotification()
             }
@@ -105,6 +110,7 @@ class DashcamForegroundService : LifecycleService() {
 
     override fun onDestroy() {
         stopRecordingLoop()
+        burnInExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -193,6 +199,8 @@ class DashcamForegroundService : LifecycleService() {
         val name = "dashcam_${timestamp()}.mp4"
         currentSegmentName = name
         currentSegmentLocked = false
+        currentSegmentSamples.clear()
+        captureBurnInSample()
 
         val pending: PendingRecording = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             currentSegmentFile = null
@@ -238,6 +246,8 @@ class DashcamForegroundService : LifecycleService() {
         val file = currentSegmentFile
         val uri = event.outputResults.outputUri.takeIf { it != Uri.EMPTY }
         val segmentName = currentSegmentName.ifBlank { file?.name ?: "dashcam_unknown.mp4" }
+        val segmentLocked = currentSegmentLocked
+        val segmentSamples = currentSegmentSamples.toList()
         currentSegmentFile = null
         currentSegmentName = ""
         currentRecording = null
@@ -253,30 +263,73 @@ class DashcamForegroundService : LifecycleService() {
         }
 
         if ((uri != null && sizeMb > 0) || (file != null && file.exists() && sizeMb > 0)) {
-            segments.add(
-                SegmentMeta(
-                    uri = uri,
-                    file = file,
-                    name = segmentName,
-                    sizeMb = sizeMb,
-                    locked = currentSegmentLocked,
+            if (running && rollingToNextSegment) {
+                rollingToNextSegment = false
+                startNewSegment()
+            }
+
+            activeBurnInJobs += 1
+            burnInExecutor.execute {
+                val burnInResult = DashcamVideoBurnIn.processSegment(
+                    context = this,
+                    sourceFile = file,
+                    sourceUri = uri,
+                    samples = segmentSamples,
                 )
-            )
-            usedMb = segments.sumOf { it.sizeMb }
-            pruneUnlockedSegmentsIfNeeded()
-            DashcamStatusStore.onSegmentFinalized(segmentName, usedMb, currentSegmentLocked, this)
+
+                mainHandler.post {
+                    if (burnInResult.sizeMb > 0) {
+                        segments.add(
+                            SegmentMeta(
+                                uri = uri,
+                                file = file,
+                                name = segmentName,
+                                sizeMb = burnInResult.sizeMb,
+                                locked = segmentLocked,
+                            )
+                        )
+                        usedMb = segments.sumOf { it.sizeMb }
+                        pruneUnlockedSegmentsIfNeeded()
+                        if (!burnInResult.processed) {
+                            DashcamStatusStore.onWarning(
+                                "Video overlay not applied, original clip kept.",
+                                this,
+                            )
+                        }
+                        DashcamStatusStore.onSegmentFinalized(
+                            segmentName,
+                            usedMb,
+                            segmentLocked,
+                            this,
+                        )
+                    }
+                    activeBurnInJobs -= 1
+                    maybeFinalizeServiceStop()
+                }
+            }
         } else if (!event.hasError()) {
             DashcamStatusStore.onWarning("Clip non trovata dopo finalize.", this)
         }
 
-        if (pendingServiceStop) {
-            finalizeServiceStop()
-            return
-        }
+        maybeFinalizeServiceStop()
+    }
 
-        if (running && rollingToNextSegment) {
-            rollingToNextSegment = false
-            startNewSegment()
+    private fun captureBurnInSample() {
+        currentSegmentSamples.add(
+            DashcamVideoBurnIn.Sample(
+                timestampMs = System.currentTimeMillis(),
+                speedKmh = DashcamStatusStore.getLiveSpeedKmh(),
+            )
+        )
+
+        while (currentSegmentSamples.size > 600) {
+            currentSegmentSamples.removeAt(0)
+        }
+    }
+
+    private fun maybeFinalizeServiceStop() {
+        if (pendingServiceStop && currentRecording == null && activeBurnInJobs == 0) {
+            finalizeServiceStop()
         }
     }
 
