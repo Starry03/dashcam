@@ -64,8 +64,10 @@ class MainActivity : FlutterActivity() {
                     }
                     "openVideoFolder" -> {
                         try {
-                            val intent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY)
+                            val uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3AMovies%2FDashcam")
+                            val intent = Intent(Intent.ACTION_VIEW)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            intent.setDataAndType(uri, "vnd.android.document/directory")
                             startActivity(intent)
                             result.success(null)
                         } catch (e: Exception) {

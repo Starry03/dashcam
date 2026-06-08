@@ -2,47 +2,29 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-import '../../../core/recording_config.dart';
 import '../domain/dashcam_status.dart';
 
-class DashcamPlatform {
-  DashcamPlatform();
+class DashcamPlatformBridge {
+  static const MethodChannel _methods = MethodChannel('dashcam/control');
+  static const EventChannel _events = EventChannel('dashcam/status');
 
-  static const MethodChannel _methodChannel =
-      MethodChannel('dashcam/control');
-  static const EventChannel _eventChannel = EventChannel('dashcam/status');
+  static Stream<DashcamStatus> watchStatus() => _events
+      .receiveBroadcastStream()
+      .map((e) => DashcamStatus.fromMap(Map<Object?, Object?>.from(e as Map)));
 
-  Stream<DashcamStatus>? _statusStream;
-
-  Stream<DashcamStatus> get statusStream {
-    _statusStream ??= _eventChannel
-        .receiveBroadcastStream()
-        .map((event) => DashcamStatus.fromMap((event as Map).cast<Object?, Object?>()));
-    return _statusStream!;
-  }
-
-  Future<DashcamStatus> getStatus() async {
-    final map = await _methodChannel.invokeMapMethod<Object?, Object?>('getStatus');
-    return DashcamStatus.fromMap(map ?? const <Object?, Object?>{});
-  }
-
-  Future<DashcamStatus> startRecording(RecordingConfig config) async {
-    final map = await _methodChannel.invokeMapMethod<Object?, Object?>(
-      'startRecording',
-      config.toMap(),
-    );
-    return DashcamStatus.fromMap(map ?? const <Object?, Object?>{});
-  }
-
-  Future<DashcamStatus> stopRecording() async {
-    final map =
-        await _methodChannel.invokeMapMethod<Object?, Object?>('stopRecording');
-    return DashcamStatus.fromMap(map ?? const <Object?, Object?>{});
-  }
-
-  Future<DashcamStatus> lockCurrentSegment() async {
-    final map =
-        await _methodChannel.invokeMapMethod<Object?, Object?>('lockSegment');
-    return DashcamStatus.fromMap(map ?? const <Object?, Object?>{});
-  }
+  static Future<void> startRecording() =>
+      _methods.invokeMethod('startRecording');
+  static Future<void> stopRecording() => _methods.invokeMethod('stopRecording');
+  static Future<void> pauseRecording() =>
+      _methods.invokeMethod('pauseRecording');
+  static Future<void> resumeRecording() =>
+      _methods.invokeMethod('resumeRecording');
+  static Future<void> lockIncident() => _methods.invokeMethod('lockIncident');
+  static Future<void> openVideoFolder() =>
+      _methods.invokeMethod('openVideoFolder');
+  static Future<void> setCameraLens(bool isFront) =>
+      _methods.invokeMethod('setCameraLens', {'isFrontCamera': isFront});
+  static Future<void> refreshStatus() => _methods.invokeMethod('refreshStatus');
+  static Future<void> updateLiveStats(double speedKmh) =>
+      _methods.invokeMethod('updateLiveStats', {'speedKmh': speedKmh});
 }

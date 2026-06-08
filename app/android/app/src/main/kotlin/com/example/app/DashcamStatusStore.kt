@@ -10,6 +10,9 @@ import android.os.Environment
 import android.os.StatFs
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import android.provider.MediaStore
+import java.io.File
+import java.util.Locale
 
 object DashcamStatusStore {
     var onStatus: ((Map<String, Any>) -> Unit)? = null
@@ -20,6 +23,7 @@ object DashcamStatusStore {
     private var storageUsedMb: Int = 0
     private var lastSegment: String = "-"
     private var lastSegmentLocked: Boolean = false
+    private var attemptedLoadLatestSegment: Boolean = false
     private var warning: String = ""
     private var liveSpeedKmh: Double = 0.0
     private var lowStorageNotificationSent: Boolean = false
@@ -161,6 +165,11 @@ object DashcamStatusStore {
     }
 
     fun emitCurrent(context: Context? = null) {
+        if (!attemptedLoadLatestSegment && lastSegment == "-" && context != null) {
+            attemptedLoadLatestSegment = true
+            lastSegment = findLatestSegmentName(context)
+        }
+        
         val freeStorageMb = getFreeStorageMb(context)
         if (freeStorageMb <= LOW_STORAGE_THRESHOLD_MB) {
             if (warning.isBlank() || warning.startsWith("Remaining storage")) {
@@ -233,6 +242,22 @@ object DashcamStatusStore {
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
+    }
+
+    private fun findLatestSegmentName(context: Context): String {
+        try {
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "Dashcam")
+            if (dir.exists()) {
+                val lastFile = dir.listFiles { f -> f.isFile && f.extension.lowercase(Locale.US) == "mp4" }
+                    ?.maxByOrNull { it.lastModified() }
+                if (lastFile != null) {
+                    return lastFile.name
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        return "-"
     }
 
     private const val LOW_STORAGE_THRESHOLD_MB = 5 * 1024
