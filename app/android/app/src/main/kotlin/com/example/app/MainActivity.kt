@@ -63,18 +63,17 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "openVideoFolder" -> {
-                        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video/*")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        }
                         try {
-                            startActivity(viewIntent)
+                            val intent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
                             result.success(null)
                         } catch (e: Exception) {
                             try {
-                                val fallbackIntent = Intent(Intent.ACTION_PICK, android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-                                fallbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                startActivity(fallbackIntent)
+                                val fallback = Intent(Intent.ACTION_VIEW)
+                                fallback.type = "video/*"
+                                fallback.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                startActivity(fallback)
                                 result.success(null)
                             } catch(e2: Exception) {
                                 result.error("ERROR", "No compatible app found", null)

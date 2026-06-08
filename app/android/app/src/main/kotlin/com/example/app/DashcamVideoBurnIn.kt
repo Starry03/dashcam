@@ -2,6 +2,9 @@ package com.example.app
 
 import android.content.Context
 import android.net.Uri
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -21,20 +24,6 @@ object DashcamVideoBurnIn {
 
     private const val FONT_NAME = "Roboto"
 
-    // Resolved once; null means the FFmpeg AAR is not on the classpath.
-    private val ffmpegKitClass: Class<*>? by lazy {
-        try { Class.forName("com.arthenica.ffmpegkit.FFmpegKit") } catch (_: ClassNotFoundException) { null }
-    }
-    private val ffmpegKitConfigClass: Class<*>? by lazy {
-        try { Class.forName("com.arthenica.ffmpegkit.FFmpegKitConfig") } catch (_: ClassNotFoundException) { null }
-    }
-    private val returnCodeClass: Class<*>? by lazy {
-        try { Class.forName("com.arthenica.ffmpegkit.ReturnCode") } catch (_: ClassNotFoundException) { null }
-    }
-
-    private val ffmpegAvailable: Boolean get() =
-        ffmpegKitClass != null && ffmpegKitConfigClass != null && returnCodeClass != null
-
     fun processSegment(
         context: Context,
         sourceFile: File?,
@@ -47,14 +36,11 @@ object DashcamVideoBurnIn {
             else -> 0
         }
 
-        if (!ffmpegAvailable || samples.isEmpty() || (sourceFile == null && sourceUri == null)) {
+        if (samples.isEmpty() || (sourceFile == null && sourceUri == null)) {
             return Result(processed = false, sizeMb = fallbackSizeMb)
         }
 
-        // FFmpegKitConfig.setFontDirectoryList(context, listOf("/system/fonts"), emptyMap())
-        ffmpegKitConfigClass!!
-            .getMethod("setFontDirectoryList", Context::class.java, List::class.java, Map::class.java)
-            .invoke(null, context, listOf("/system/fonts"), emptyMap<String, String>())
+        FFmpegKitConfig.setFontDirectoryList(context, listOf("/system/fonts"), emptyMap<String, String>())
 
         val workDir = File(context.cacheDir, "dashcam-burnin").apply { mkdirs() }
         val stamp = System.currentTimeMillis()
@@ -75,20 +61,10 @@ object DashcamVideoBurnIn {
 
             val command = buildCommand(inputFile, outputFile, subtitlesFile)
 
-            // val session = FFmpegKit.execute(command)
-            val session = ffmpegKitClass!!
-                .getMethod("execute", String::class.java)
-                .invoke(null, command)
+            val session = FFmpegKit.execute(command)
+            val returnCode = session.returnCode
 
-            // val returnCode = session.returnCode
-            val returnCode = session!!.javaClass.getMethod("getReturnCode").invoke(session)
-
-            // if (!ReturnCode.isSuccess(returnCode) || !outputFile.exists())
-            val isSuccess = returnCodeClass!!
-                .getMethod("isSuccess", returnCodeClass)
-                .invoke(null, returnCode) as Boolean
-
-            if (!isSuccess || !outputFile.exists()) {
+            if (!ReturnCode.isSuccess(returnCode) || !outputFile.exists()) {
                 return Result(processed = false, sizeMb = fallbackSizeMb)
             }
 
@@ -107,7 +83,8 @@ object DashcamVideoBurnIn {
                 else -> fallbackSizeMb
             }
             return Result(processed = true, sizeMb = processedSizeMb)
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            DashcamStatusStore.onWarning("Burn-in error: ${e.message}", context)
             return Result(processed = false, sizeMb = fallbackSizeMb)
         } finally {
             inputFile.delete()

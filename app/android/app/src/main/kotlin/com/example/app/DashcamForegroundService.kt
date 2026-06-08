@@ -115,7 +115,12 @@ class DashcamForegroundService : LifecycleService() {
     }
 
     private fun startRecordingLoop() {
-        if (running) return
+        if (running) {
+            // Must call startForeground even if already running to satisfy system constraints
+            // if startForegroundService was just called again.
+            startForeground(NOTIFICATION_ID, buildNotification())
+            return
+        }
         if (!hasCameraPermission()) {
             DashcamStatusStore.onWarning("Camera permission is required to record.", this)
             return
