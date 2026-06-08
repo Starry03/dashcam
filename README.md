@@ -68,10 +68,9 @@ flutter build apk
 ## Preview
 
 <p align="center">
-  <img src="./assets/home.jpg" alt="Home screen" style="max-width:600px; width:100%; height:auto;" />
-</p>
-<p align="center">
-  <img src="./assets/notify.jpg" alt="Notification controls screen" style="max-width:600px; width:100%; height:auto;" />
+  <img src="./assets/home.jpg" alt="Home screen" width="250" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="./assets/notify.jpg" alt="Notification controls screen" width="250" />
 </p>
 
 ## Roadmap
