@@ -13,6 +13,7 @@ Future<void> showQuickActionsSheet(
   required VoidCallback onOpenGallery,
   required VoidCallback onChangeLoopRecording,
   required ValueChanged<bool> onToggleInfinityFocus,
+  required VoidCallback onCheckUpdates,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -124,6 +125,22 @@ Future<void> showQuickActionsSheet(
                 value: infinityFocus,
                 onChanged: (val) {
                   onToggleInfinityFocus(val);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.system_update_rounded,
+                  color: Colors.white,
+                ),
+                title: const Text('Check for Updates'),
+                subtitle: const Text(
+                  'Check and install latest version from GitHub',
+                  style: TextStyle(color: Colors.white54),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onCheckUpdates();
                 },
               ),
             ],

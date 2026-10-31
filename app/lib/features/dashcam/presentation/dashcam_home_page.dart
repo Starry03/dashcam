@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -118,14 +120,39 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     return false;
   }
 
-  Future<void> _checkForGithubUpdate() async {
+  Future<void> _checkForGithubUpdate({bool manual = false}) async {
     if (_installedVersion.isEmpty) return;
+
+    if (manual && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Checking for updates...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
 
     try {
       final release = await GithubReleaseService.fetchLatestRelease();
-      if (!mounted || release == null) return;
+      if (!mounted) return;
+
+      if (release == null) {
+        if (manual) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to reach GitHub for updates.')),
+          );
+        }
+        return;
+      }
 
       if (!_isVersionNewer(release.version, _installedVersion)) {
+        if (manual) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('App is up to date (v$_installedVersion).'),
+            ),
+          );
+        }
         return;
       }
 
@@ -136,47 +163,182 @@ class _DashcamHomePageState extends State<DashcamHomePage>
           return AlertDialog(
             title: const Text('Update available'),
             content: Text(
-              'A new version (${release.tag}) is available on GitHub.\n\nCurrent: $_installedVersion\nLatest: ${release.version}\n\nDo you want to download and install it now?',
+              'A new version (${release.tag}) is available.\n\nCurrent: v$_installedVersion\nLatest: ${release.tag}\n\nDo you want to download and install it directly?',
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
                 child: const Text('Later'),
               ),
-              FilledButton(
+              FilledButton.icon(
+                icon: const Icon(Icons.download_rounded, size: 18),
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('Update'),
+                label: const Text('Install Now'),
               ),
             ],
           );
         },
       );
 
-      if (!mounted) return;
+      if (!mounted || shouldUpdate != true) return;
 
-      if (shouldUpdate == true) {
-        final apkUri = Uri.tryParse(release.apkUrl);
-        if (apkUri != null && await canLaunchUrl(apkUri)) {
-          await launchUrl(apkUri, mode: LaunchMode.externalApplication);
-          return;
-        }
-
-        final releaseUri = Uri.tryParse(release.htmlUrl);
-        if (releaseUri != null) {
-          await launchUrl(releaseUri, mode: LaunchMode.externalApplication);
-          return;
-        }
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to open the update link.')),
-          );
-        }
-        return;
+      await _downloadAndInstallApk(release);
+    } catch (e) {
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update check failed: $e')),
+        );
       }
-    } catch (_) {
-      // Silent failure: startup must remain smooth if release API is unavailable.
     }
+  }
+
+  Future<void> _downloadAndInstallApk(ReleaseInfo release) async {
+    final cacheDir = await DashcamPlatformBridge.getCacheDir();
+    if (cacheDir == null) {
+      final apkUri = Uri.tryParse(release.apkUrl);
+      if (apkUri != null && await canLaunchUrl(apkUri)) {
+        await launchUrl(apkUri, mode: LaunchMode.externalApplication);
+      }
+      return;
+    }
+
+    final targetFile = File('$cacheDir/update_${release.version}.apk');
+    if (targetFile.existsSync()) {
+      try {
+        targetFile.deleteSync();
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    var progress = 0.0;
+    var statusText = 'Connecting to GitHub...';
+    var hasError = false;
+    var errorMessage = '';
+    var started = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            void startDownload() async {
+              try {
+                final client = http.Client();
+                final request = http.Request('GET', Uri.parse(release.apkUrl));
+                final response = await client.send(request);
+
+                if (response.statusCode != 200) {
+                  throw Exception('HTTP error ${response.statusCode}');
+                }
+
+                final totalBytes = response.contentLength ?? 0;
+                var receivedBytes = 0;
+                final sink = targetFile.openWrite();
+
+                await response.stream.listen(
+                  (chunk) {
+                    sink.add(chunk);
+                    receivedBytes += chunk.length;
+                    if (totalBytes > 0) {
+                      setModalState(() {
+                        progress = receivedBytes / totalBytes;
+                        final recMb = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
+                        final totMb = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
+                        statusText = '$recMb MB / $totMb MB (${(progress * 100).toInt()}%)';
+                      });
+                    } else {
+                      setModalState(() {
+                        final recMb = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
+                        statusText = '$recMb MB downloaded';
+                      });
+                    }
+                  },
+                  cancelOnError: true,
+                ).asFuture<void>();
+
+                await sink.flush();
+                await sink.close();
+                client.close();
+
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+
+                await DashcamPlatformBridge.installApk(targetFile.path);
+              } catch (e) {
+                setModalState(() {
+                  hasError = true;
+                  errorMessage = '$e';
+                });
+              }
+            }
+
+            if (!started) {
+              started = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                startDownload();
+              });
+            }
+
+            return AlertDialog(
+              title: Text(hasError ? 'Download Failed' : 'Downloading Update'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!hasError) ...[
+                    LinearProgressIndicator(
+                      value: progress > 0 ? progress : null,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      statusText,
+                      style: const TextStyle(fontSize: 13, color: Colors.white70),
+                    ),
+                  ] else ...[
+                    Text(
+                      'Failed to download the update:\n$errorMessage',
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                if (hasError) ...[
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () async {
+                      Navigator.of(dialogContext).pop();
+                      final apkUri = Uri.tryParse(release.apkUrl);
+                      if (apkUri != null && await canLaunchUrl(apkUri)) {
+                        await launchUrl(apkUri, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                    child: const Text('Open in Browser'),
+                  ),
+                ] else ...[
+                  TextButton(
+                    onPressed: () {
+                      try {
+                        targetFile.deleteSync();
+                      } catch (_) {}
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _toggleCamera() async {
@@ -388,6 +550,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         onOpenGallery: () => unawaited(_openGallery()),
         onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
         onToggleInfinityFocus: (val) => unawaited(_toggleInfinityFocus(val)),
+        onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
       ),
     );
   }
@@ -465,9 +628,23 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   onQuickActions: _openQuickActionsSheet,
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  _appVersion,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => unawaited(_checkForGithubUpdate(manual: true)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _appVersion,
+                          style: const TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.refresh_rounded, size: 13, color: Colors.white38),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
