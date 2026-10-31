@@ -163,7 +163,7 @@ class SpeedTracker extends ChangeNotifier {
 
   void _handlePositionUpdate(Position position) {
     // Keep only reliable samples to avoid speed spikes from noisy GPS readings.
-    if (position.accuracy > 35) {
+    if (position.accuracy > 45) {
       _setStatus(GpsUiStatus.weakSignal);
       return;
     }
@@ -172,16 +172,16 @@ class SpeedTracker extends ChangeNotifier {
     _recordSample(position, now);
 
     final nativeSpeedValid =
-        position.speed >= 0 &&
+        position.speed > 0.5 &&
         position.speed <= 70 &&
         (!position.speedAccuracy.isFinite || position.speedAccuracy <= 6.0);
 
     final windowSpeedMps = _estimateWindowSpeedMps();
     double? speedMps;
-    if (nativeSpeedValid && position.speedAccuracy <= 6.0) {
+    if (nativeSpeedValid) {
       speedMps = position.speed;
     } else {
-      speedMps = windowSpeedMps ?? (nativeSpeedValid ? position.speed : null);
+      speedMps = windowSpeedMps ?? (position.speed >= 0 ? position.speed : null);
     }
 
     if (speedMps == null) {

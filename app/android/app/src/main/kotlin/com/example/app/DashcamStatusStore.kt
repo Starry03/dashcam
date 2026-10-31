@@ -30,6 +30,8 @@ object DashcamStatusStore {
     private var cachedFreeStorageMb: Int = 0
     private var lastFreeStorageReadAtMs: Long = 0L
     var isFrontCamera: Boolean = false
+    var loopRecordingMinutes: Int = 0
+    var infinityFocus: Boolean = true
 
     fun startRecording(context: Context) {
         if (isRecording) return
@@ -78,6 +80,17 @@ object DashcamStatusStore {
 
     fun setCameraLens(isFront: Boolean, context: Context) {
         isFrontCamera = isFront
+        emitCurrent(context)
+    }
+
+    fun setInfinityFocus(enabled: Boolean, context: Context) {
+        infinityFocus = enabled
+        if (isRecordingActive()) {
+            val intent = Intent(context, DashcamForegroundService::class.java).apply {
+                action = DashcamForegroundService.ACTION_UPDATE_FOCUS
+            }
+            context.startService(intent)
+        }
         emitCurrent(context)
     }
 
@@ -200,6 +213,7 @@ object DashcamStatusStore {
                 "warning" to warning,
                 "isFrontCamera" to isFrontCamera,
                 "speedKmh" to liveSpeedKmh,
+                "infinityFocus" to infinityFocus,
             )
         )
     }

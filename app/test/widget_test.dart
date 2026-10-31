@@ -8,6 +8,6 @@ void main() {
 
     expect(find.text('READY'), findsOneWidget);
     expect(find.text('Lock Clip'), findsOneWidget);
-    expect(find.text('Gallery'), findsOneWidget);
+    expect(find.text('Quick Actions'), findsOneWidget);
   });
 }

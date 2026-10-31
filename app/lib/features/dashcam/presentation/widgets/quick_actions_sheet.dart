@@ -6,9 +6,13 @@ Future<void> showQuickActionsSheet(
   BuildContext context, {
   required bool isFrontCamera,
   required bool isRecording,
+  required int loopRecordingMinutes,
+  required bool infinityFocus,
   required VoidCallback onSwitchLens,
   required VoidCallback onLock,
   required VoidCallback onOpenGallery,
+  required VoidCallback onChangeLoopRecording,
+  required ValueChanged<bool> onToggleInfinityFocus,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -88,6 +92,38 @@ Future<void> showQuickActionsSheet(
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   onOpenGallery();
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.loop_rounded,
+                  color: Colors.white,
+                ),
+                title: const Text('Loop Recording'),
+                subtitle: Text(
+                  loopRecordingMinutes == 0 ? 'Off (Save All)' : 'Last $loopRecordingMinutes Minutes',
+                  style: const TextStyle(color: Colors.white54),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onChangeLoopRecording();
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                secondary: const Icon(
+                  Icons.all_inclusive_rounded,
+                  color: Colors.white,
+                ),
+                title: const Text('Road Focus (Infinity)'),
+                subtitle: const Text(
+                  'Locks focus to the road, ignoring windshield & reflections',
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+                value: infinityFocus,
+                onChanged: (val) {
+                  onToggleInfinityFocus(val);
                 },
               ),
             ],

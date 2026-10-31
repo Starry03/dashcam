@@ -15,7 +15,12 @@ import android.os.Environment
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import android.hardware.camera2.CaptureRequest
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.FallbackStrategy
@@ -28,6 +33,10 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import android.provider.MediaStore
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -51,6 +60,7 @@ class DashcamForegroundService : LifecycleService() {
     private var activeBurnInJobs = 0
 
     private var cameraProvider: ProcessCameraProvider? = null
+    private var currentCamera: Camera? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var currentRecording: Recording? = null
     private var currentSegmentFile: File? = null
@@ -63,6 +73,7 @@ class DashcamForegroundService : LifecycleService() {
         val name: String,
         var sizeMb: Int,
         var locked: Boolean,
+        val timestampMs: Long = System.currentTimeMillis(),
     )
 
     private val segments: MutableList<SegmentMeta> = mutableListOf()
@@ -94,6 +105,95 @@ class DashcamForegroundService : LifecycleService() {
         }
     }
 
+    private var locationManager: LocationManager? = null
+    private var lastLocation: Location? = null
+
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            val speedKmh = calculateSpeedKmh(location)
+            DashcamStatusStore.updateLiveSpeed(speedKmh)
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+    }
+
+    private fun calculateSpeedKmh(location: Location): Double {
+        if (location.hasSpeed() && location.speed > 0.3f) {
+            lastLocation = location
+            return (location.speed * 3.6).coerceIn(0.0, 250.0)
+        }
+
+        val previous = lastLocation
+        lastLocation = location
+        if (previous != null) {
+            val elapsedMs = location.time - previous.time
+            if (elapsedMs in 500..10000) {
+                val distanceMeters = location.distanceTo(previous)
+                val mps = distanceMeters / (elapsedMs / 1000.0)
+                if (mps in 0.5..70.0) {
+                    return (mps * 3.6).coerceIn(0.0, 250.0)
+                }
+            }
+        }
+        return 0.0
+    }
+
+    private fun startLocationUpdates() {
+        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+
+        try {
+            if (locationManager == null) {
+                locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            }
+            val lm = locationManager ?: return
+
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                lm.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    1000L,
+                    0f,
+                    locationListener,
+                    Looper.getMainLooper()
+                )
+            }
+            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                lm.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    1000L,
+                    0f,
+                    locationListener,
+                    Looper.getMainLooper()
+                )
+            }
+            val lastGps = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val lastNet = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            val best = when {
+                lastGps != null && lastNet != null -> if (lastGps.time > lastNet.time) lastGps else lastNet
+                lastGps != null -> lastGps
+                else -> lastNet
+            }
+            if (best != null && System.currentTimeMillis() - best.time < 30000) {
+                val initSpeed = calculateSpeedKmh(best)
+                if (initSpeed > 0) DashcamStatusStore.updateLiveSpeed(initSpeed)
+            }
+        } catch (e: Exception) {
+            DashcamStatusStore.onWarning("GPS init error: ${e.message}", this)
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        try {
+            locationManager?.removeUpdates(locationListener)
+        } catch (_: Exception) {}
+        lastLocation = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
@@ -104,13 +204,20 @@ class DashcamForegroundService : LifecycleService() {
             ACTION_TOGGLE -> if (running) stopRecordingLoop() else startRecordingLoop()
             ACTION_REFRESH_NOTIFICATION -> if (running) updateNotification()
             ACTION_LOCK_INCIDENT -> lockCurrentOrLatestSegment()
+            ACTION_UPDATE_FOCUS -> applyFocusMode()
         }
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        stopRecordingLoop()
     }
 
     override fun onDestroy() {
         stopRecordingLoop()
-        burnInExecutor.shutdownNow()
+        stopLocationUpdates()
+        burnInExecutor.shutdown()
         super.onDestroy()
     }
 
@@ -130,6 +237,7 @@ class DashcamForegroundService : LifecycleService() {
         loadExistingSegments()
         running = true
         paused = false
+        startLocationUpdates()
         startForeground(NOTIFICATION_ID, buildNotification())
         DashcamStatusStore.notifyRecordingStarted(this)
         DashcamStatusStore.resumeRecording(this)
@@ -158,7 +266,9 @@ class DashcamForegroundService : LifecycleService() {
     }
 
     private fun finalizeServiceStop() {
+        stopLocationUpdates()
         currentRecording = null
+        currentCamera = null
         cameraProvider?.unbindAll()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -182,17 +292,39 @@ class DashcamForegroundService : LifecycleService() {
                 videoCapture = VideoCapture.withOutput(recorder)
 
                 cameraProvider?.unbindAll()
-                cameraProvider?.bindToLifecycle(
+                currentCamera = cameraProvider?.bindToLifecycle(
                     this,
-                    if (DashcamStatusStore.isFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else if (DashcamStatusStore.isFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
+                    if (DashcamStatusStore.isFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
                     videoCapture
                 )
+                applyFocusMode()
                 startNewSegment()
             } catch (t: Throwable) {
                 DashcamStatusStore.onWarning("Unable to start camera: ${t.message ?: "unknown"}", this)
                 stopRecordingLoop()
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun applyFocusMode() {
+        val cam = currentCamera ?: return
+        if (DashcamStatusStore.isFrontCamera) return
+
+        try {
+            val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+            if (DashcamStatusStore.infinityFocus) {
+                val options = CaptureRequestOptions.Builder()
+                    .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                    .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f)
+                    .build()
+                camera2Control.setCaptureRequestOptions(options)
+            } else {
+                camera2Control.clearCaptureRequestOptions()
+            }
+        } catch (e: Exception) {
+            DashcamStatusStore.onWarning("Focus config error: ${e.message}", this)
+        }
     }
 
     private fun startNewSegment() {
@@ -274,6 +406,7 @@ class DashcamForegroundService : LifecycleService() {
             }
 
             activeBurnInJobs += 1
+            updateNotification()
             burnInExecutor.execute {
                 val burnInResult = DashcamVideoBurnIn.processSegment(
                     context = this,
@@ -309,6 +442,7 @@ class DashcamForegroundService : LifecycleService() {
                         )
                     }
                     activeBurnInJobs -= 1
+                    updateNotification()
                     maybeFinalizeServiceStop()
                 }
             }
@@ -375,6 +509,30 @@ class DashcamForegroundService : LifecycleService() {
             DashcamStatusStore.onWarning("Resume recording before locking the current segment.", this)
             return
         }
+
+        val loopMinutes = DashcamStatusStore.loopRecordingMinutes
+        if (loopMinutes > 0) {
+            var lockedCount = 0
+            if (currentRecording != null) {
+                currentSegmentLocked = true
+                lockedCount++
+            }
+            val now = System.currentTimeMillis()
+            for (segment in segments) {
+                if (!segment.locked) {
+                    val ageMs = now - segment.timestampMs
+                    if (ageMs <= loopMinutes * 60 * 1000L) {
+                        segment.locked = true
+                        lockedCount++
+                    }
+                }
+            }
+            if (lockedCount > 0) {
+                DashcamStatusStore.onWarning("Locked last $loopMinutes minutes.", this)
+                return
+            }
+        }
+
         if (currentRecording != null) {
             currentSegmentLocked = true
             DashcamStatusStore.onWarning("Incident marker will lock the current segment.", this)
@@ -390,33 +548,44 @@ class DashcamForegroundService : LifecycleService() {
     }
 
     private fun pruneUnlockedSegmentsIfNeeded() {
+        val loopMinutes = DashcamStatusStore.loopRecordingMinutes
+        val now = System.currentTimeMillis()
         var freeMb = DashcamStatusStore.getFreeStorageMb(this)
-        if (freeMb >= 500) {
-            return
-        }
 
         val iterator = segments.iterator()
-        while (freeMb < 500 && iterator.hasNext()) {
+        while (iterator.hasNext()) {
             val segment = iterator.next()
             if (segment.locked) {
                 continue
             }
-            val deleted = when {
-                segment.uri != null -> contentResolver.delete(segment.uri, null, null) > 0
-                segment.file != null -> {
-                    val file = segment.file
-                    file?.delete() == true
+            
+            var shouldDelete = false
+            if (freeMb < 500) {
+                shouldDelete = true
+            } else if (loopMinutes > 0) {
+                val ageMs = now - segment.timestampMs
+                if (ageMs > loopMinutes * 60 * 1000L) {
+                    shouldDelete = true
                 }
-                else -> false
             }
-            if (deleted) {
-                usedMb -= segment.sizeMb
-                freeMb += segment.sizeMb
-                iterator.remove()
+
+            if (shouldDelete) {
+                val deleted = when {
+                    segment.uri != null -> contentResolver.delete(segment.uri, null, null) > 0
+                    segment.file != null -> {
+                        val file = segment.file
+                        file?.delete() == true
+                    }
+                    else -> false
+                }
+                if (deleted) {
+                    usedMb -= segment.sizeMb
+                    freeMb += segment.sizeMb
+                    iterator.remove()
+                }
             }
         }
 
-        freeMb = DashcamStatusStore.getFreeStorageMb(this)
         if (freeMb < 500) {
             DashcamStatusStore.onWarning("Storage full and all remaining clips are locked.", this)
         }
@@ -440,12 +609,15 @@ class DashcamForegroundService : LifecycleService() {
                 val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
                 val sizeIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                val dateModifiedIdx = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idIdx)
                     val name = cursor.getString(nameIdx) ?: "dashcam_unknown.mp4"
                     val sizeMb = ((cursor.getLong(sizeIdx)) / (1024 * 1024)).toInt().coerceAtLeast(1)
                     val uri = ContentUris.withAppendedId(collection, id)
-                    segments.add(SegmentMeta(uri = uri, file = null, name = name, sizeMb = sizeMb, locked = false))
+                    val dateModified = cursor.getLong(dateModifiedIdx)
+                    val timestampMs = if (dateModified > 0) dateModified * 1000L else System.currentTimeMillis()
+                    segments.add(SegmentMeta(uri = uri, file = null, name = name, sizeMb = sizeMb, locked = false, timestampMs = timestampMs))
                 }
             }
         } else {
@@ -455,6 +627,7 @@ class DashcamForegroundService : LifecycleService() {
                     ?.sortedBy { it.lastModified() }
                     ?.forEach { file ->
                         val sizeMb = (file.length() / (1024 * 1024)).toInt().coerceAtLeast(1)
+                        val timestampMs = file.lastModified()
                         segments.add(
                             SegmentMeta(
                                 uri = null,
@@ -462,6 +635,7 @@ class DashcamForegroundService : LifecycleService() {
                                 name = file.name,
                                 sizeMb = sizeMb,
                                 locked = false,
+                                timestampMs = timestampMs,
                             )
                         )
                     }
@@ -527,14 +701,23 @@ class DashcamForegroundService : LifecycleService() {
         val mins = (elapsedSeconds % 3600) / 60
         val secs = elapsedSeconds % 60
         val speedKmh = DashcamStatusStore.getLiveSpeedKmh()
-        val subtitle = String.format(
-            Locale.US,
-            "%02d:%02d:%02d • %.1f km/h",
-            hours,
-            mins,
-            secs,
-            speedKmh
-        )
+        val title = when {
+            pendingServiceStop && activeBurnInJobs > 0 -> "Dashcam - Saving clip..."
+            paused -> "Dashcam paused"
+            else -> "Dashcam"
+        }
+        val subtitle = if (pendingServiceStop && activeBurnInJobs > 0) {
+            "Processing video overlay..."
+        } else {
+            String.format(
+                Locale.US,
+                "%02d:%02d:%02d • %.1f km/h",
+                hours,
+                mins,
+                secs,
+                speedKmh
+            )
+        }
 
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -570,16 +753,20 @@ class DashcamForegroundService : LifecycleService() {
         val pauseResumeIcon =
             if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(if (paused) "Dashcam paused" else "Dashcam")
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
             .setContentText(subtitle)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openAppPendingIntent)
-            .addAction(pauseResumeIcon, pauseResumeLabel, pauseResumePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
-            .build()
+
+        if (!pendingServiceStop) {
+            builder.addAction(pauseResumeIcon, pauseResumeLabel, pauseResumePendingIntent)
+            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
+        }
+
+        return builder.build()
     }
 
     companion object {
@@ -590,6 +777,7 @@ class DashcamForegroundService : LifecycleService() {
         const val ACTION_TOGGLE = "dashcam.action.TOGGLE"
         const val ACTION_REFRESH_NOTIFICATION = "dashcam.action.REFRESH_NOTIFICATION"
         const val ACTION_LOCK_INCIDENT = "dashcam.action.LOCK"
+        const val ACTION_UPDATE_FOCUS = "dashcam.action.UPDATE_FOCUS"
 
         private const val CHANNEL_ID = "dashcam_recording"
         private const val NOTIFICATION_ID = 7001

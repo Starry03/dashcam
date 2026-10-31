@@ -23,6 +23,7 @@ object DashcamVideoBurnIn {
     )
 
     private const val FONT_NAME = "Roboto"
+    private var fontsLoaded = false
 
     fun processSegment(
         context: Context,
@@ -40,7 +41,10 @@ object DashcamVideoBurnIn {
             return Result(processed = false, sizeMb = fallbackSizeMb)
         }
 
-        FFmpegKitConfig.setFontDirectoryList(context, listOf("/system/fonts"), emptyMap<String, String>())
+        if (!fontsLoaded) {
+            FFmpegKitConfig.setFontDirectoryList(context, listOf("/system/fonts"), emptyMap<String, String>())
+            fontsLoaded = true
+        }
 
         val workDir = File(context.cacheDir, "dashcam-burnin").apply { mkdirs() }
         val stamp = System.currentTimeMillis()
@@ -65,6 +69,10 @@ object DashcamVideoBurnIn {
             val returnCode = session.returnCode
 
             if (!ReturnCode.isSuccess(returnCode) || !outputFile.exists()) {
+                val failReason = session.allLogsAsString?.takeLast(300)
+                    ?: session.failStackTrace
+                    ?: "FFmpeg returned code ${returnCode?.value ?: -1}"
+                DashcamStatusStore.onWarning("Burn-in failed: ${failReason.take(100)}", context)
                 return Result(processed = false, sizeMb = fallbackSizeMb)
             }
 
@@ -94,13 +102,14 @@ object DashcamVideoBurnIn {
     }
 
     private fun buildCommand(inputFile: File, outputFile: File, subtitlesFile: File): String {
-        val subtitlesFilter = "subtitles=${quotePath(subtitlesFile.absolutePath)}"
+        val escapedSubtitlesPath = subtitlesFile.absolutePath.replace("\\", "/").replace("'", "\\'")
+        val subtitlesFilter = "subtitles='$escapedSubtitlesPath'"
         return buildString {
             append("-y -i ")
             append(quotePath(inputFile.absolutePath))
             append(" -map 0:v:0 -map 0:a? -vf \"")
             append(subtitlesFilter)
-            append("\" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a copy -movflags +faststart ")
+            append("\" -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy -movflags +faststart ")
             append(quotePath(outputFile.absolutePath))
         }
     }
@@ -130,7 +139,8 @@ object DashcamVideoBurnIn {
 
         samples.forEachIndexed { index, sample ->
             val startSeconds = index.toDouble()
-            val endSeconds = startSeconds + 1.0
+            val isLast = index == samples.size - 1
+            val endSeconds = if (isLast) startSeconds + 10.0 else startSeconds + 1.0
             val text = buildString {
                 append("{\\fs28\\c&HCCCCCC&}")
                 append(formatter.format(Date(sample.timestampMs)))

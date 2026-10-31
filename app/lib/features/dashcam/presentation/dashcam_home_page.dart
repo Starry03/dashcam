@@ -40,6 +40,8 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   bool _didCheckUpdates = false;
   bool _isFrontCamera = false;
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
+  int _loopRecordingMinutes = 0;
+  bool _infinityFocus = true;
 
   @override
   void initState() {
@@ -78,7 +80,11 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   Future<void> _loadInitData() async {
     final prefs = await SharedPreferences.getInstance();
     _isFrontCamera = prefs.getBool('isFrontCamera') ?? false;
+    _loopRecordingMinutes = prefs.getInt('loopRecordingMinutes') ?? 0;
+    _infinityFocus = prefs.getBool('infinityFocus') ?? true;
     await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
+    await DashcamPlatformBridge.setLoopRecordingMinutes(_loopRecordingMinutes);
+    await DashcamPlatformBridge.setInfinityFocus(_infinityFocus);
     final info = await PackageInfo.fromPlatform();
     _installedVersion = info.version;
     setState(() => _appVersion = 'version ${info.version}');
@@ -184,6 +190,38 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isFrontCamera', _isFrontCamera);
     await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
+  }
+
+  Future<void> _changeLoopRecording() async {
+    final values = [0, 5, 10, 15, 30];
+    final labels = ['Off (Save All)', 'Last 5 Minutes', 'Last 10 Minutes', 'Last 15 Minutes', 'Last 30 Minutes'];
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Loop Recording'),
+          content: RadioGroup<int>(
+            groupValue: _loopRecordingMinutes,
+            onChanged: (val) => Navigator.of(context).pop(val),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(values.length, (i) {
+                return RadioListTile<int>(
+                  title: Text(labels[i]),
+                  value: values[i],
+                );
+              }),
+            ),
+          ),
+        );
+      },
+    );
+    if (selected != null && selected != _loopRecordingMinutes) {
+      setState(() => _loopRecordingMinutes = selected);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('loopRecordingMinutes', selected);
+      await DashcamPlatformBridge.setLoopRecordingMinutes(selected);
+    }
   }
 
   @override
@@ -329,6 +367,13 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     }
   }
 
+  Future<void> _toggleInfinityFocus(bool enabled) async {
+    setState(() => _infinityFocus = enabled);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('infinityFocus', enabled);
+    await DashcamPlatformBridge.setInfinityFocus(enabled);
+  }
+
   void _openQuickActionsSheet() {
     if (!mounted) return;
     unawaited(
@@ -336,9 +381,13 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         context,
         isFrontCamera: _isFrontCamera,
         isRecording: _status.isRecording,
+        loopRecordingMinutes: _loopRecordingMinutes,
+        infinityFocus: _infinityFocus,
         onSwitchLens: () => unawaited(_toggleCamera()),
         onLock: () => unawaited(_lockIncident()),
         onOpenGallery: () => unawaited(_openGallery()),
+        onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
+        onToggleInfinityFocus: (val) => unawaited(_toggleInfinityFocus(val)),
       ),
     );
   }
@@ -362,7 +411,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
                 const SizedBox(height: 18),
                 SpeedIndicator(
-                  speedKmh: _speedTracker.speedKmh,
+                  speedKmh: _speedTracker.speedKmh > 0
+                      ? _speedTracker.speedKmh
+                      : _status.speedKmh,
                   gpsStatus: _speedTracker.gpsStatus,
                 ),
                 const SizedBox(height: 40),

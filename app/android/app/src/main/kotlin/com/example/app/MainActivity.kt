@@ -53,6 +53,16 @@ class MainActivity : FlutterActivity() {
                         DashcamStatusStore.setCameraLens(isFront, this)
                         result.success(null)
                     }
+                    "setLoopRecordingMinutes" -> {
+                        val minutes = call.argument<Int>("minutes") ?: 0
+                        DashcamStatusStore.loopRecordingMinutes = minutes
+                        result.success(null)
+                    }
+                    "setInfinityFocus" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: true
+                        DashcamStatusStore.setInfinityFocus(enabled, this)
+                        result.success(null)
+                    }
                     "refreshStatus" -> {
                         DashcamStatusStore.emitCurrent(this)
                         result.success(null)
@@ -106,7 +116,9 @@ class MainActivity : FlutterActivity() {
     private fun ensurePermissions() {
         val needed = mutableListOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

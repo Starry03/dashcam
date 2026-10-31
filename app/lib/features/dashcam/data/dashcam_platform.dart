@@ -20,10 +20,14 @@ class DashcamPlatformBridge {
   static Future<void> resumeRecording() =>
       _methods.invokeMethod('resumeRecording');
   static Future<void> lockIncident() => _methods.invokeMethod('lockIncident');
+  static Future<void> setLoopRecordingMinutes(int minutes) =>
+      _methods.invokeMethod('setLoopRecordingMinutes', {'minutes': minutes});
   static Future<void> openVideoFolder() =>
       _methods.invokeMethod('openVideoFolder');
   static Future<void> setCameraLens(bool isFront) =>
       _methods.invokeMethod('setCameraLens', {'isFrontCamera': isFront});
+  static Future<void> setInfinityFocus(bool enabled) =>
+      _methods.invokeMethod('setInfinityFocus', {'enabled': enabled});
   static Future<void> refreshStatus() => _methods.invokeMethod('refreshStatus');
   static Future<void> updateLiveStats(double speedKmh) =>
       _methods.invokeMethod('updateLiveStats', {'speedKmh': speedKmh});
