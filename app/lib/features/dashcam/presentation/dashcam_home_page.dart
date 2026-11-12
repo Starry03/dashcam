@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,7 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/dashcam_platform.dart';
 import '../domain/dashcam_status.dart';
 import '../services/github_release_service.dart';
-import '../services/speed_tracker.dart';
+import '../domain/gps_status.dart';
 import 'widgets/control_panel.dart';
 import 'widgets/elapsed_timer.dart';
 import 'widgets/quick_actions_sheet.dart';
@@ -32,7 +31,6 @@ class DashcamHomePage extends StatefulWidget {
 class _DashcamHomePageState extends State<DashcamHomePage>
     with WidgetsBindingObserver {
   late final StreamSubscription<DashcamStatus> _statusSub;
-  late final SpeedTracker _speedTracker;
   Timer? _statusRefreshTimer;
   DashcamStatus _status = DashcamStatus.idle;
   String _error = '';
@@ -41,7 +39,6 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   String _installedVersion = '';
   bool _didCheckUpdates = false;
   bool _isFrontCamera = false;
-  AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
   int _loopRecordingMinutes = 0;
   bool _infinityFocus = true;
   String _videoOverlayMode = 'subtitles';
@@ -51,26 +48,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _speedTracker = SpeedTracker(
-      onLiveSpeed: (kmh, hasFix) =>
-          unawaited(DashcamPlatformBridge.updateLiveStats(kmh, hasGpsFix: hasFix)),
-      onEvent: _handleSpeedEvent,
-      onError: (message) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            duration: const Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      },
-    )..addListener(_onSpeedTrackerChanged);
     _loadInitData();
-    unawaited(_syncSpeedTracking());
     _startStatusRefreshTicker();
     _statusSub = DashcamPlatformBridge.watchStatus().listen((s) {
-      final recordingStateChanged = s.isRecording != _status.isRecording;
       setState(() {
         if (s.warning != _status.warning) {
           _dismissedWarning = false;
@@ -78,14 +58,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         _status = s;
         _error = '';
       });
-      if (recordingStateChanged) {
-        unawaited(_syncSpeedTracking(showMessages: false));
-      }
     }, onError: (e) => setState(() => _error = 'Error: $e'));
-  }
-
-  void _onSpeedTrackerChanged() {
-    if (mounted) setState(() {});
   }
 
   Future<void> _loadInitData() async {
@@ -150,7 +123,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       if (release == null) {
         if (manual) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to reach GitHub for updates.')),
+            const SnackBar(
+              content: Text('Unable to reach GitHub for updates.'),
+            ),
           );
         }
         return;
@@ -159,9 +134,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       if (!_isVersionNewer(release.version, _installedVersion)) {
         if (manual) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('App is up to date (v$_installedVersion).'),
-            ),
+            SnackBar(content: Text('App is up to date (v$_installedVersion).')),
           );
         }
         return;
@@ -196,9 +169,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
       await _downloadAndInstallApk(release);
     } catch (e) {
       if (manual && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Update check failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Update check failed: $e')));
       }
     }
   }
@@ -248,26 +221,27 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 var receivedBytes = 0;
                 final sink = targetFile.openWrite();
 
-                await response.stream.listen(
-                  (chunk) {
-                    sink.add(chunk);
-                    receivedBytes += chunk.length;
-                    if (totalBytes > 0) {
-                      setModalState(() {
-                        progress = receivedBytes / totalBytes;
-                        final recMb = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
-                        final totMb = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
-                        statusText = '$recMb MB / $totMb MB (${(progress * 100).toInt()}%)';
-                      });
-                    } else {
-                      setModalState(() {
-                        final recMb = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
-                        statusText = '$recMb MB downloaded';
-                      });
-                    }
-                  },
-                  cancelOnError: true,
-                ).asFuture<void>();
+                await response.stream.listen((chunk) {
+                  sink.add(chunk);
+                  receivedBytes += chunk.length;
+                  if (totalBytes > 0) {
+                    setModalState(() {
+                      progress = receivedBytes / totalBytes;
+                      final recMb = (receivedBytes / (1024 * 1024))
+                          .toStringAsFixed(1);
+                      final totMb = (totalBytes / (1024 * 1024))
+                          .toStringAsFixed(1);
+                      statusText =
+                          '$recMb MB / $totMb MB (${(progress * 100).toInt()}%)';
+                    });
+                  } else {
+                    setModalState(() {
+                      final recMb = (receivedBytes / (1024 * 1024))
+                          .toStringAsFixed(1);
+                      statusText = '$recMb MB downloaded';
+                    });
+                  }
+                }, cancelOnError: true).asFuture<void>();
 
                 await sink.flush();
                 await sink.close();
@@ -307,12 +281,18 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                     const SizedBox(height: 12),
                     Text(
                       statusText,
-                      style: const TextStyle(fontSize: 13, color: Colors.white70),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.white70,
+                      ),
                     ),
                   ] else ...[
                     Text(
                       'Failed to download the update:\n$errorMessage',
-                      style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ],
@@ -328,7 +308,10 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                       Navigator.of(dialogContext).pop();
                       final apkUri = Uri.tryParse(release.apkUrl);
                       if (apkUri != null && await canLaunchUrl(apkUri)) {
-                        await launchUrl(apkUri, mode: LaunchMode.externalApplication);
+                        await launchUrl(
+                          apkUri,
+                          mode: LaunchMode.externalApplication,
+                        );
                       }
                     },
                     child: const Text('Open in Browser'),
@@ -367,7 +350,13 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
   Future<void> _changeLoopRecording() async {
     final values = [0, 5, 10, 15, 30];
-    final labels = ['Off (Save All)', 'Last 5 Minutes', 'Last 10 Minutes', 'Last 15 Minutes', 'Last 30 Minutes'];
+    final labels = [
+      'Off (Save All)',
+      'Last 5 Minutes',
+      'Last 10 Minutes',
+      'Last 15 Minutes',
+      'Last 30 Minutes',
+    ];
     final selected = await showDialog<int>(
       context: context,
       builder: (context) {
@@ -436,8 +425,6 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _speedTracker.removeListener(_onSpeedTrackerChanged);
-    _speedTracker.dispose();
     _statusRefreshTimer?.cancel();
     _statusSub.cancel();
     super.dispose();
@@ -451,67 +438,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    _appLifecycleState = state;
-    unawaited(_syncSpeedTracking(showMessages: false));
-  }
-
-  bool get _shouldTrackGps {
-    return _status.isRecording ||
-        _appLifecycleState == AppLifecycleState.resumed;
-  }
-
-  Future<void> _syncSpeedTracking({bool showMessages = true}) async {
-    if (_shouldTrackGps) {
-      await _speedTracker.start(
-        recording: _status.isRecording,
-        showMessages: showMessages,
-      );
-    } else {
-      _speedTracker.stop(recording: _status.isRecording);
-    }
-  }
-
-  void _handleSpeedEvent(SpeedTrackerEvent event) {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    switch (event) {
-      case SpeedTrackerEvent.permissionDenied:
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Location permission denied: speed unavailable.'),
-            duration: Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      case SpeedTrackerEvent.permissionDeniedForever:
-        messenger.showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Location permission blocked: enable it in settings.',
-            ),
-            duration: const Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'Settings',
-              onPressed: Geolocator.openAppSettings,
-            ),
-          ),
-        );
-      case SpeedTrackerEvent.serviceDisabled:
-        messenger.showSnackBar(
-          SnackBar(
-            content: const Text('Enable GPS to display speed.'),
-            duration: const Duration(seconds: 3),
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'Open GPS',
-              onPressed: Geolocator.openLocationSettings,
-            ),
-          ),
-        );
-    }
-  }
+  void didChangeAppLifecycleState(AppLifecycleState state) {}
 
   Future<void> _toggleRecording() async {
     if (_busy) return;
@@ -629,10 +556,10 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
                 const SizedBox(height: 12),
                 SpeedIndicator(
-                  speedKmh: _speedTracker.speedKmh > 0
-                      ? _speedTracker.speedKmh
-                      : _status.speedKmh,
-                  gpsStatus: _speedTracker.gpsStatus,
+                  speedKmh: _status.speedKmh,
+                  gpsStatus: _status.hasGpsFix
+                      ? GpsUiStatus.active
+                      : GpsUiStatus.weakSignal,
                 ),
                 const SizedBox(height: 20),
                 Row(

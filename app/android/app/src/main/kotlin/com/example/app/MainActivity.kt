@@ -72,12 +72,6 @@ class MainActivity : FlutterActivity() {
                         DashcamStatusStore.emitCurrent(this)
                         result.success(null)
                     }
-                    "updateLiveStats" -> {
-                        val speedKmh = call.argument<Double>("speedKmh") ?: 0.0
-                        val hasFix = call.argument<Boolean>("hasGpsFix") ?: true
-                        DashcamStatusStore.updateLiveSpeed(speedKmh, hasFix)
-                        result.success(null)
-                    }
                     "openVideoFolder" -> {
                         try {
                             val uri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3AMovies%2FDashcam")

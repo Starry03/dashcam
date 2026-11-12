@@ -35,9 +35,4 @@ class DashcamPlatformBridge {
   static Future<void> installApk(String filePath) =>
       _methods.invokeMethod('installApk', {'filePath': filePath});
   static Future<void> refreshStatus() => _methods.invokeMethod('refreshStatus');
-  static Future<void> updateLiveStats(double speedKmh, {bool hasGpsFix = true}) =>
-      _methods.invokeMethod('updateLiveStats', {
-        'speedKmh': speedKmh,
-        'hasGpsFix': hasGpsFix,
-      });
 }

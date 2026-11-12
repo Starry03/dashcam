@@ -47,6 +47,7 @@ android {
 
 dependencies {
     val cameraXVersion = "1.4.0"
+    implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
     implementation("androidx.camera:camera-core:$cameraXVersion")
     implementation("androidx.camera:camera-camera2:$cameraXVersion")

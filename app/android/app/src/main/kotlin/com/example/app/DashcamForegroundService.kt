@@ -14,7 +14,6 @@ import android.net.Uri
 import android.os.Environment
 import android.os.Build
 import android.os.Handler
-import android.os.Looper
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import android.hardware.camera2.CaptureRequest
@@ -34,13 +33,16 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import android.provider.MediaStore
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Bundle
+import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.Priority
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -107,40 +109,55 @@ class DashcamForegroundService : LifecycleService() {
         }
     }
 
-    private var locationManager: LocationManager? = null
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var lastLocation: Location? = null
+    private var filteredSpeedMps = 0.0
 
-    private val locationListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            val speedKmh = calculateSpeedKmh(location)
-            DashcamStatusStore.updateLiveSpeed(speedKmh, true)
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            result.locations.forEach { location ->
+                calculateSpeedMps(location)?.let { speedMps ->
+                    filteredSpeedMps = if (speedMps < 0.5) {
+                        0.0
+                    } else {
+                        filteredSpeedMps * 0.2 + speedMps * 0.8
+                    }
+                    DashcamStatusStore.updateLiveSpeed(
+                        (filteredSpeedMps * 3.6).coerceIn(0.0, 250.0),
+                        true
+                    )
+                }
+            }
         }
-
-        @Deprecated("Deprecated in Java")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
     }
 
-    private fun calculateSpeedKmh(location: Location): Double {
-        if (location.hasSpeed() && location.speed > 0.3f) {
-            lastLocation = location
-            return (location.speed * 3.6).coerceIn(0.0, 250.0)
+    private fun calculateSpeedMps(location: Location): Double? {
+        if (location.accuracy > 45f) {
+            return null
         }
 
         val previous = lastLocation
         lastLocation = location
+        val nativeSpeedReliable = location.hasSpeed() &&
+            location.speed >= 0f &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                !location.hasSpeedAccuracy() ||
+                location.speedAccuracyMetersPerSecond <= 3f)
+        if (nativeSpeedReliable) {
+            return location.speed.toDouble().coerceIn(0.0, 70.0)
+        }
+
         if (previous != null) {
             val elapsedMs = location.time - previous.time
             if (elapsedMs in 300..5000) {
                 val distanceMeters = location.distanceTo(previous)
                 val mps = distanceMeters / (elapsedMs / 1000.0)
-                if (mps in 0.5..70.0) {
-                    return (mps * 3.6).coerceIn(0.0, 250.0)
+                if (mps in 0.0..70.0) {
+                    return mps
                 }
             }
         }
-        return 0.0
+        return null
     }
 
     private fun startLocationUpdates() {
@@ -150,39 +167,22 @@ class DashcamForegroundService : LifecycleService() {
         }
 
         try {
-            if (locationManager == null) {
-                locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            if (!::fusedLocationClient.isInitialized) {
+                fusedLocationClient = com.google.android.gms.location.LocationServices
+                    .getFusedLocationProviderClient(this)
             }
-            val lm = locationManager ?: return
-
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                lm.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    500L,
-                    0f,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
-            } else if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                lm.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    1000L,
-                    0f,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
-            }
-            val lastGps = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            val lastNet = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            val best = when {
-                lastGps != null && lastNet != null -> if (lastGps.time > lastNet.time) lastGps else lastNet
-                lastGps != null -> lastGps
-                else -> lastNet
-            }
-            if (best != null && System.currentTimeMillis() - best.time < 10000) {
-                val initSpeed = calculateSpeedKmh(best)
-                if (initSpeed > 0) DashcamStatusStore.updateLiveSpeed(initSpeed, true)
-            }
+            val request = LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                500L
+            ).setMinUpdateIntervalMillis(250L)
+                .setMaxUpdateDelayMillis(1000L)
+                .setWaitForAccurateLocation(true)
+                .build()
+            fusedLocationClient.requestLocationUpdates(
+                request,
+                locationCallback,
+                Looper.getMainLooper()
+            )
         } catch (e: Exception) {
             DashcamStatusStore.onWarning("GPS init error: ${e.message}", this)
         }
@@ -190,9 +190,13 @@ class DashcamForegroundService : LifecycleService() {
 
     private fun stopLocationUpdates() {
         try {
-            locationManager?.removeUpdates(locationListener)
+            if (::fusedLocationClient.isInitialized) {
+                fusedLocationClient.removeLocationUpdates(locationCallback)
+            }
         } catch (_: Exception) {}
         lastLocation = null
+        filteredSpeedMps = 0.0
+        DashcamStatusStore.updateLiveSpeed(0.0, false)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
