@@ -11,6 +11,8 @@ class DashcamStatus {
     required this.isFrontCamera,
     this.speedKmh = 0.0,
     this.infinityFocus = true,
+    this.hasGpsFix = false,
+    this.videoOverlayMode = 'subtitles',
   });
 
   final bool isRecording;
@@ -24,6 +26,8 @@ class DashcamStatus {
   final bool isFrontCamera;
   final double speedKmh;
   final bool infinityFocus;
+  final bool hasGpsFix;
+  final String videoOverlayMode;
 
   factory DashcamStatus.fromMap(Map<Object?, Object?> map) {
     return DashcamStatus(
@@ -38,6 +42,8 @@ class DashcamStatus {
       isFrontCamera: map['isFrontCamera'] as bool? ?? false,
       speedKmh: (map['speedKmh'] as num?)?.toDouble() ?? 0.0,
       infinityFocus: map['infinityFocus'] as bool? ?? true,
+      hasGpsFix: map['hasGpsFix'] as bool? ?? false,
+      videoOverlayMode: map['videoOverlayMode'] as String? ?? 'subtitles',
     );
   }
 
@@ -53,5 +59,7 @@ class DashcamStatus {
     isFrontCamera: false,
     speedKmh: 0.0,
     infinityFocus: true,
+    hasGpsFix: false,
+    videoOverlayMode: 'subtitles',
   );
 }

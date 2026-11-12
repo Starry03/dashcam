@@ -28,11 +28,16 @@ class DashcamPlatformBridge {
       _methods.invokeMethod('setCameraLens', {'isFrontCamera': isFront});
   static Future<void> setInfinityFocus(bool enabled) =>
       _methods.invokeMethod('setInfinityFocus', {'enabled': enabled});
+  static Future<void> setVideoOverlayMode(String mode) =>
+      _methods.invokeMethod('setVideoOverlayMode', {'mode': mode});
   static Future<String?> getCacheDir() =>
       _methods.invokeMethod<String>('getCacheDir');
   static Future<void> installApk(String filePath) =>
       _methods.invokeMethod('installApk', {'filePath': filePath});
   static Future<void> refreshStatus() => _methods.invokeMethod('refreshStatus');
-  static Future<void> updateLiveStats(double speedKmh) =>
-      _methods.invokeMethod('updateLiveStats', {'speedKmh': speedKmh});
+  static Future<void> updateLiveStats(double speedKmh, {bool hasGpsFix = true}) =>
+      _methods.invokeMethod('updateLiveStats', {
+        'speedKmh': speedKmh,
+        'hasGpsFix': hasGpsFix,
+      });
 }

@@ -37,8 +37,8 @@ class SpeedTracker extends ChangeNotifier {
   });
 
   /// Called when a new live speed (km/h) should be pushed to the recorder,
-  /// rate-limited to ~1s or a >=0.7 km/h delta.
-  final void Function(double speedKmh) onLiveSpeed;
+  /// with indicator whether GPS has active fix.
+  final void Function(double speedKmh, bool hasGpsFix) onLiveSpeed;
   final void Function(SpeedTrackerEvent event) onEvent;
   final void Function(String message) onError;
 
@@ -124,12 +124,12 @@ class SpeedTracker extends ChangeNotifier {
       ),
     );
 
-    final cutoff = timestamp.subtract(const Duration(seconds: 5));
+    final cutoff = timestamp.subtract(const Duration(seconds: 3));
     while (_samples.length > 2 && _samples.first.timestamp.isBefore(cutoff)) {
       _samples.removeAt(0);
     }
 
-    while (_samples.length > 8) {
+    while (_samples.length > 6) {
       _samples.removeAt(0);
     }
   }
@@ -154,7 +154,7 @@ class SpeedTracker extends ChangeNotifier {
             .difference(_samples.first.timestamp)
             .inMilliseconds /
         1000;
-    if (elapsedSeconds < 2.0) return null;
+    if (elapsedSeconds < 0.8) return null;
 
     final speedMps = distanceMeters / elapsedSeconds;
     if (!speedMps.isFinite || speedMps > 70) return null;
@@ -165,6 +165,7 @@ class SpeedTracker extends ChangeNotifier {
     // Keep only reliable samples to avoid speed spikes from noisy GPS readings.
     if (position.accuracy > 45) {
       _setStatus(GpsUiStatus.weakSignal);
+      onLiveSpeed(0.0, false);
       return;
     }
 
@@ -172,7 +173,7 @@ class SpeedTracker extends ChangeNotifier {
     _recordSample(position, now);
 
     final nativeSpeedValid =
-        position.speed > 0.5 &&
+        position.speed > 0.2 &&
         position.speed <= 70 &&
         (!position.speedAccuracy.isFinite || position.speedAccuracy <= 6.0);
 
@@ -189,14 +190,14 @@ class SpeedTracker extends ChangeNotifier {
     }
 
     final speedKmh = math.max(0.0, math.min(250.0, speedMps * 3.6)).toDouble();
-    final double smoothingAlpha = speedKmh < 15 ? 0.45 : 0.30;
+    final double smoothingAlpha = speedKmh < 0.5 ? 1.0 : 0.80;
     final double smoothedKmh =
         (_speedKmh * (1 - smoothingAlpha)) + (speedKmh * smoothingAlpha);
-    final double liveSpeedKmh = smoothedKmh < 1 ? 0.0 : smoothedKmh;
+    final double liveSpeedKmh = smoothedKmh < 0.5 ? 0.0 : smoothedKmh;
 
     final shouldRefreshUi =
         _status != GpsUiStatus.active ||
-        (_speedKmh - liveSpeedKmh).abs() >= 0.2;
+        (_speedKmh - liveSpeedKmh).abs() >= 0.1;
     if (shouldRefreshUi) {
       _status = GpsUiStatus.active;
       _speedKmh = liveSpeedKmh;
@@ -206,12 +207,12 @@ class SpeedTracker extends ChangeNotifier {
     final nowForPush = DateTime.now();
     final reachedPushInterval =
         _lastPushAt == null ||
-        nowForPush.difference(_lastPushAt!).inMilliseconds >= 1000;
-    final changedEnoughForPush = (_lastPushedKmh - liveSpeedKmh).abs() >= 0.7;
+        nowForPush.difference(_lastPushAt!).inMilliseconds >= 300;
+    final changedEnoughForPush = (_lastPushedKmh - liveSpeedKmh).abs() >= 0.2;
     if (reachedPushInterval || changedEnoughForPush) {
       _lastPushedKmh = liveSpeedKmh;
       _lastPushAt = nowForPush;
-      onLiveSpeed(liveSpeedKmh);
+      onLiveSpeed(liveSpeedKmh, true);
     }
   }
 

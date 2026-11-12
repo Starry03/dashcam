@@ -8,23 +8,27 @@ Future<void> showQuickActionsSheet(
   required bool isRecording,
   required int loopRecordingMinutes,
   required bool infinityFocus,
+  required String videoOverlayMode,
   required VoidCallback onSwitchLens,
   required VoidCallback onLock,
   required VoidCallback onOpenGallery,
   required VoidCallback onChangeLoopRecording,
   required ValueChanged<bool> onToggleInfinityFocus,
+  required VoidCallback onChangeOverlayMode,
   required VoidCallback onCheckUpdates,
 }) {
   return showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
     backgroundColor: const Color(0xFF1D1D1D),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (sheetContext) {
+      final bottomPadding = MediaQuery.of(sheetContext).padding.bottom;
       return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomPadding),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -125,6 +129,26 @@ Future<void> showQuickActionsSheet(
                 value: infinityFocus,
                 onChanged: (val) {
                   onToggleInfinityFocus(val);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.layers_rounded,
+                  color: Colors.white,
+                ),
+                title: const Text('Video Overlay'),
+                subtitle: Text(
+                  videoOverlayMode == 'subtitles'
+                      ? 'Subtitles Track (No Heat)'
+                      : (videoOverlayMode == 'burnin'
+                          ? 'Burn-in on Video (High CPU)'
+                          : 'Off (Disabled)'),
+                  style: const TextStyle(color: Colors.white54),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onChangeOverlayMode();
                 },
               ),
               ListTile(

@@ -63,13 +63,19 @@ class MainActivity : FlutterActivity() {
                         DashcamStatusStore.setInfinityFocus(enabled, this)
                         result.success(null)
                     }
+                    "setVideoOverlayMode" -> {
+                        val mode = call.argument<String>("mode") ?: "subtitles"
+                        DashcamStatusStore.videoOverlayMode = mode
+                        result.success(null)
+                    }
                     "refreshStatus" -> {
                         DashcamStatusStore.emitCurrent(this)
                         result.success(null)
                     }
                     "updateLiveStats" -> {
                         val speedKmh = call.argument<Double>("speedKmh") ?: 0.0
-                        DashcamStatusStore.updateLiveSpeed(speedKmh)
+                        val hasFix = call.argument<Boolean>("hasGpsFix") ?: true
+                        DashcamStatusStore.updateLiveSpeed(speedKmh, hasFix)
                         result.success(null)
                     }
                     "openVideoFolder" -> {

@@ -14,7 +14,7 @@ import java.util.Locale
 object DashcamVideoBurnIn {
     data class Sample(
         val timestampMs: Long,
-        val speedKmh: Double,
+        val speedKmh: Double?,
     )
 
     data class Result(
@@ -37,11 +37,12 @@ object DashcamVideoBurnIn {
             else -> 0
         }
 
-        if (samples.isEmpty() || (sourceFile == null && sourceUri == null)) {
-            return Result(processed = false, sizeMb = fallbackSizeMb)
+        val mode = DashcamStatusStore.videoOverlayMode
+        if (mode == "none" || samples.isEmpty() || (sourceFile == null && sourceUri == null)) {
+            return Result(processed = true, sizeMb = fallbackSizeMb)
         }
 
-        if (!fontsLoaded) {
+        if (mode == "burnin" && !fontsLoaded) {
             FFmpegKitConfig.setFontDirectoryList(context, listOf("/system/fonts"), emptyMap<String, String>())
             fontsLoaded = true
         }
@@ -50,7 +51,8 @@ object DashcamVideoBurnIn {
         val stamp = System.currentTimeMillis()
         val inputFile = File(workDir, "input_$stamp.mp4")
         val outputFile = File(workDir, "output_$stamp.mp4")
-        val subtitlesFile = File(workDir, "overlay_$stamp.ass")
+        val isSubtitlesMode = mode == "subtitles"
+        val subtitlesFile = if (isSubtitlesMode) File(workDir, "overlay_$stamp.srt") else File(workDir, "overlay_$stamp.ass")
 
         try {
             if (sourceFile != null) {
@@ -61,9 +63,17 @@ object DashcamVideoBurnIn {
                 } ?: return Result(processed = false, sizeMb = fallbackSizeMb)
             }
 
-            subtitlesFile.writeText(buildAss(samples))
+            if (isSubtitlesMode) {
+                subtitlesFile.writeText(buildSrt(samples))
+            } else {
+                subtitlesFile.writeText(buildAss(samples))
+            }
 
-            val command = buildCommand(inputFile, outputFile, subtitlesFile)
+            val command = if (isSubtitlesMode) {
+                buildSoftSubtitlesCommand(inputFile, outputFile, subtitlesFile)
+            } else {
+                buildBurnInCommand(inputFile, outputFile, subtitlesFile)
+            }
 
             val session = FFmpegKit.execute(command)
             val returnCode = session.returnCode
@@ -72,7 +82,7 @@ object DashcamVideoBurnIn {
                 val failReason = session.allLogsAsString?.takeLast(300)
                     ?: session.failStackTrace
                     ?: "FFmpeg returned code ${returnCode?.value ?: -1}"
-                DashcamStatusStore.onWarning("Burn-in failed: ${failReason.take(100)}", context)
+                DashcamStatusStore.onWarning("Overlay failed: ${failReason.take(100)}", context)
                 return Result(processed = false, sizeMb = fallbackSizeMb)
             }
 
@@ -92,7 +102,7 @@ object DashcamVideoBurnIn {
             }
             return Result(processed = true, sizeMb = processedSizeMb)
         } catch (e: Throwable) {
-            DashcamStatusStore.onWarning("Burn-in error: ${e.message}", context)
+            DashcamStatusStore.onWarning("Overlay error: ${e.message}", context)
             return Result(processed = false, sizeMb = fallbackSizeMb)
         } finally {
             inputFile.delete()
@@ -101,17 +111,57 @@ object DashcamVideoBurnIn {
         }
     }
 
-    private fun buildCommand(inputFile: File, outputFile: File, subtitlesFile: File): String {
+    private fun buildBurnInCommand(inputFile: File, outputFile: File, subtitlesFile: File): String {
         val escapedSubtitlesPath = subtitlesFile.absolutePath.replace("\\", "/").replace("'", "\\'")
         val subtitlesFilter = "subtitles='$escapedSubtitlesPath'"
         return buildString {
-            append("-y -i ")
+            append("-y -threads 2 -i ")
             append(quotePath(inputFile.absolutePath))
             append(" -map 0:v:0 -map 0:a? -vf \"")
             append(subtitlesFilter)
             append("\" -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p -c:a copy -movflags +faststart ")
             append(quotePath(outputFile.absolutePath))
         }
+    }
+
+    private fun buildSoftSubtitlesCommand(inputFile: File, outputFile: File, subtitlesFile: File): String {
+        return buildString {
+            append("-y -i ")
+            append(quotePath(inputFile.absolutePath))
+            append(" -i ")
+            append(quotePath(subtitlesFile.absolutePath))
+            append(" -map 0:v:0 -map 0:a? -map 1:0 -c:v copy -c:a copy -c:s mov_text -movflags +faststart ")
+            append(quotePath(outputFile.absolutePath))
+        }
+    }
+
+    private fun buildSrt(samples: List<Sample>): String {
+        val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val sb = StringBuilder()
+        samples.forEachIndexed { index, sample ->
+            val startSeconds = index.toDouble()
+            val isLast = index == samples.size - 1
+            val endSeconds = if (isLast) startSeconds + 10.0 else startSeconds + 1.0
+
+            sb.appendLine((index + 1).toString())
+            sb.appendLine("${formatSrtTime(startSeconds)} --> ${formatSrtTime(endSeconds)}")
+            sb.append(formatter.format(Date(sample.timestampMs)))
+            if (sample.speedKmh != null && sample.speedKmh >= 0) {
+                sb.append(" | ").append(String.format(Locale.US, "%.1f km/h", sample.speedKmh))
+            }
+            sb.appendLine()
+            sb.appendLine()
+        }
+        return sb.toString()
+    }
+
+    private fun formatSrtTime(seconds: Double): String {
+        val totalMs = (seconds * 1000).toLong().coerceAtLeast(0L)
+        val hours = totalMs / 3600000
+        val mins = (totalMs % 3600000) / 60000
+        val secs = (totalMs % 60000) / 1000
+        val ms = totalMs % 1000
+        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, mins, secs, ms)
     }
 
     private fun buildAss(samples: List<Sample>): String {
@@ -144,8 +194,10 @@ object DashcamVideoBurnIn {
             val text = buildString {
                 append("{\\fs28\\c&HCCCCCC&}")
                 append(formatter.format(Date(sample.timestampMs)))
-                append("\\N{\\fs46\\c&HFFFFFF&}")
-                append(String.format(Locale.US, "%.1f km/h", sample.speedKmh))
+                if (sample.speedKmh != null && sample.speedKmh >= 0) {
+                    append("\\N{\\fs46\\c&HFFFFFF&}")
+                    append(String.format(Locale.US, "%.1f km/h", sample.speedKmh))
+                }
             }
             content.appendLine(
                 "Dialogue: 0,${formatAssTime(startSeconds)},${formatAssTime(endSeconds)},Default,,0,0,0,,$text",

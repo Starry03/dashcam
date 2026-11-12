@@ -44,20 +44,26 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
   int _loopRecordingMinutes = 0;
   bool _infinityFocus = true;
+  String _videoOverlayMode = 'subtitles';
+  bool _dismissedWarning = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _speedTracker = SpeedTracker(
-      onLiveSpeed: (kmh) =>
-          unawaited(DashcamPlatformBridge.updateLiveStats(kmh)),
+      onLiveSpeed: (kmh, hasFix) =>
+          unawaited(DashcamPlatformBridge.updateLiveStats(kmh, hasGpsFix: hasFix)),
       onEvent: _handleSpeedEvent,
       onError: (message) {
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       },
     )..addListener(_onSpeedTrackerChanged);
     _loadInitData();
@@ -66,6 +72,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     _statusSub = DashcamPlatformBridge.watchStatus().listen((s) {
       final recordingStateChanged = s.isRecording != _status.isRecording;
       setState(() {
+        if (s.warning != _status.warning) {
+          _dismissedWarning = false;
+        }
         _status = s;
         _error = '';
       });
@@ -84,9 +93,11 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     _isFrontCamera = prefs.getBool('isFrontCamera') ?? false;
     _loopRecordingMinutes = prefs.getInt('loopRecordingMinutes') ?? 0;
     _infinityFocus = prefs.getBool('infinityFocus') ?? true;
+    _videoOverlayMode = prefs.getString('videoOverlayMode') ?? 'subtitles';
     await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
     await DashcamPlatformBridge.setLoopRecordingMinutes(_loopRecordingMinutes);
     await DashcamPlatformBridge.setInfinityFocus(_infinityFocus);
+    await DashcamPlatformBridge.setVideoOverlayMode(_videoOverlayMode);
     final info = await PackageInfo.fromPlatform();
     _installedVersion = info.version;
     setState(() => _appVersion = 'version ${info.version}');
@@ -386,6 +397,42 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     }
   }
 
+  Future<void> _changeOverlayMode() async {
+    final values = ['subtitles', 'burnin', 'none'];
+    final labels = [
+      'Subtitles Track (No Heat - Recommended)',
+      'Burn-in on Video (High CPU / Heat)',
+      'Off (No Text Overlay)',
+    ];
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Video Overlay'),
+          content: RadioGroup<String>(
+            groupValue: _videoOverlayMode,
+            onChanged: (val) => Navigator.of(context).pop(val),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(values.length, (i) {
+                return RadioListTile<String>(
+                  title: Text(labels[i]),
+                  value: values[i],
+                );
+              }),
+            ),
+          ),
+        );
+      },
+    );
+    if (selected != null && selected != _videoOverlayMode) {
+      setState(() => _videoOverlayMode = selected);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('videoOverlayMode', selected);
+      await DashcamPlatformBridge.setVideoOverlayMode(selected);
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -433,6 +480,8 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         messenger.showSnackBar(
           const SnackBar(
             content: Text('Location permission denied: speed unavailable.'),
+            duration: Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       case SpeedTrackerEvent.permissionDeniedForever:
@@ -441,6 +490,8 @@ class _DashcamHomePageState extends State<DashcamHomePage>
             content: const Text(
               'Location permission blocked: enable it in settings.',
             ),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'Settings',
               onPressed: Geolocator.openAppSettings,
@@ -451,6 +502,8 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         messenger.showSnackBar(
           SnackBar(
             content: const Text('Enable GPS to display speed.'),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'Open GPS',
               onPressed: Geolocator.openLocationSettings,
@@ -545,11 +598,13 @@ class _DashcamHomePageState extends State<DashcamHomePage>
         isRecording: _status.isRecording,
         loopRecordingMinutes: _loopRecordingMinutes,
         infinityFocus: _infinityFocus,
+        videoOverlayMode: _videoOverlayMode,
         onSwitchLens: () => unawaited(_toggleCamera()),
         onLock: () => unawaited(_lockIncident()),
         onOpenGallery: () => unawaited(_openGallery()),
         onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
         onToggleInfinityFocus: (val) => unawaited(_toggleInfinityFocus(val)),
+        onChangeOverlayMode: () => unawaited(_changeOverlayMode()),
         onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
       ),
     );
@@ -560,9 +615,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     return Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(0, 0, 0, 124),
+            padding: const EdgeInsets.only(bottom: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -570,26 +625,28 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   isRecording: _status.isRecording,
                   isPaused: _status.isPaused,
                 ),
-                const SizedBox(height: 50),
+                const SizedBox(height: 24),
                 ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
-                const SizedBox(height: 18),
+                const SizedBox(height: 12),
                 SpeedIndicator(
                   speedKmh: _speedTracker.speedKmh > 0
                       ? _speedTracker.speedKmh
                       : _status.speedKmh,
                   gpsStatus: _speedTracker.gpsStatus,
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 20),
                 Row(
                   children: [
                     Expanded(
                       child: StatCard(
                         label: 'Free Storage',
-                        value: '${_status.freeStorageMb} MB',
+                        value: _status.freeStorageMb >= 1024
+                            ? '${(_status.freeStorageMb / 1024).toStringAsFixed(1)} GB'
+                            : '${_status.freeStorageMb} MB',
                         icon: Icons.storage_rounded,
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: StatCard(
                         label: 'Last Clip',
@@ -609,13 +666,19 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                     ),
                   ],
                 ),
-                if (_status.warning.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  WarningBanner(message: _status.warning),
+                if (_status.warning.isNotEmpty && !_dismissedWarning) ...[
+                  const SizedBox(height: 12),
+                  WarningBanner(
+                    message: _status.warning,
+                    onDismiss: () => setState(() => _dismissedWarning = true),
+                  ),
                 ],
                 if (_error.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  WarningBanner(message: _error),
+                  const SizedBox(height: 12),
+                  WarningBanner(
+                    message: _error,
+                    onDismiss: () => setState(() => _error = ''),
+                  ),
                 ],
                 const SizedBox(height: 16),
                 ControlPanel(
@@ -627,24 +690,10 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   onLock: () => unawaited(_lockIncident()),
                   onQuickActions: _openQuickActionsSheet,
                 ),
-                const SizedBox(height: 16),
-                InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => unawaited(_checkForGithubUpdate(manual: true)),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _appVersion,
-                          style: const TextStyle(color: Colors.white54, fontSize: 12),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.refresh_rounded, size: 13, color: Colors.white38),
-                      ],
-                    ),
-                  ),
+                const SizedBox(height: 12),
+                Text(
+                  _appVersion,
+                  style: const TextStyle(color: Colors.white24, fontSize: 11),
                 ),
               ],
             ),

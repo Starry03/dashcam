@@ -7,7 +7,7 @@ void main() {
     await tester.pumpWidget(const DashcamApp());
 
     expect(find.text('READY'), findsOneWidget);
-    expect(find.text('Lock Clip'), findsOneWidget);
+    expect(find.text('START RECORDING'), findsOneWidget);
     expect(find.text('Quick Actions'), findsOneWidget);
   });
 }

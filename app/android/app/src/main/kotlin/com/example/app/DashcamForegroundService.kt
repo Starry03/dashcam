@@ -87,7 +87,9 @@ class DashcamForegroundService : LifecycleService() {
                 elapsedSeconds += 1
                 captureBurnInSample()
                 DashcamStatusStore.onTick(elapsedSeconds, this@DashcamForegroundService)
-                updateNotification()
+                if (elapsedSeconds % 3 == 0) {
+                    updateNotification()
+                }
             }
             mainHandler.postDelayed(this, 1000)
         }
@@ -111,7 +113,7 @@ class DashcamForegroundService : LifecycleService() {
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             val speedKmh = calculateSpeedKmh(location)
-            DashcamStatusStore.updateLiveSpeed(speedKmh)
+            DashcamStatusStore.updateLiveSpeed(speedKmh, true)
         }
 
         @Deprecated("Deprecated in Java")
@@ -130,7 +132,7 @@ class DashcamForegroundService : LifecycleService() {
         lastLocation = location
         if (previous != null) {
             val elapsedMs = location.time - previous.time
-            if (elapsedMs in 500..10000) {
+            if (elapsedMs in 300..5000) {
                 val distanceMeters = location.distanceTo(previous)
                 val mps = distanceMeters / (elapsedMs / 1000.0)
                 if (mps in 0.5..70.0) {
@@ -156,13 +158,12 @@ class DashcamForegroundService : LifecycleService() {
             if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 lm.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    1000L,
+                    500L,
                     0f,
                     locationListener,
                     Looper.getMainLooper()
                 )
-            }
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            } else if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 lm.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
                     1000L,
@@ -178,9 +179,9 @@ class DashcamForegroundService : LifecycleService() {
                 lastGps != null -> lastGps
                 else -> lastNet
             }
-            if (best != null && System.currentTimeMillis() - best.time < 30000) {
+            if (best != null && System.currentTimeMillis() - best.time < 10000) {
                 val initSpeed = calculateSpeedKmh(best)
-                if (initSpeed > 0) DashcamStatusStore.updateLiveSpeed(initSpeed)
+                if (initSpeed > 0) DashcamStatusStore.updateLiveSpeed(initSpeed, true)
             }
         } catch (e: Exception) {
             DashcamStatusStore.onWarning("GPS init error: ${e.message}", this)
@@ -454,10 +455,11 @@ class DashcamForegroundService : LifecycleService() {
     }
 
     private fun captureBurnInSample() {
+        val speed = if (DashcamStatusStore.hasActiveGpsFix()) DashcamStatusStore.getLiveSpeedKmh() else -1.0
         currentSegmentSamples.add(
             DashcamVideoBurnIn.Sample(
                 timestampMs = System.currentTimeMillis(),
-                speedKmh = DashcamStatusStore.getLiveSpeedKmh(),
+                speedKmh = speed,
             )
         )
 

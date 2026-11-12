@@ -13,7 +13,7 @@ I don't code mobile apps.
 ## Current Status
 
 - Platform: Android (primary)
-- App version: 1.4.2
+- App version: 1.5.0
 - Core stack: Flutter UI + native CameraX foreground service
 
 ## Features

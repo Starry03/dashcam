@@ -19,49 +19,52 @@ class StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget content = Container(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withAlpha(25)),
+        color: Colors.white.withAlpha(10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withAlpha(20)),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Icon(icon, color: Colors.white70, size: 28),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
+          Icon(icon, color: Colors.white60, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
                   value,
-                  textAlign: TextAlign.center,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: Colors.white,
                   ),
                 ),
-              ),
-              if (trailing != null) ...[const SizedBox(width: 4), trailing!],
-            ],
+              ],
+            ),
           ),
+          if (trailing != null) ...[const SizedBox(width: 4), trailing!],
         ],
       ),
     );
 
     if (onTap != null) {
-      return GestureDetector(
+      return InkWell(
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: content,
       );

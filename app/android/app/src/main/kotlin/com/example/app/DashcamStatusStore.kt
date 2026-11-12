@@ -26,12 +26,14 @@ object DashcamStatusStore {
     private var attemptedLoadLatestSegment: Boolean = false
     private var warning: String = ""
     private var liveSpeedKmh: Double = 0.0
+    private var lastGpsFixMs: Long = 0L
     private var lowStorageNotificationSent: Boolean = false
     private var cachedFreeStorageMb: Int = 0
     private var lastFreeStorageReadAtMs: Long = 0L
     var isFrontCamera: Boolean = false
     var loopRecordingMinutes: Int = 0
     var infinityFocus: Boolean = true
+    var videoOverlayMode: String = "subtitles"
 
     fun startRecording(context: Context) {
         if (isRecording) return
@@ -99,8 +101,17 @@ object DashcamStatusStore {
         emitCurrent(context)
     }
 
-    fun updateLiveSpeed(speedKmh: Double) {
-        liveSpeedKmh = speedKmh.coerceIn(0.0, 250.0)
+    fun updateLiveSpeed(speedKmh: Double, hasFix: Boolean = true) {
+        if (hasFix) {
+            lastGpsFixMs = System.currentTimeMillis()
+            liveSpeedKmh = speedKmh.coerceIn(0.0, 250.0)
+        } else {
+            liveSpeedKmh = 0.0
+        }
+    }
+
+    fun hasActiveGpsFix(): Boolean {
+        return (System.currentTimeMillis() - lastGpsFixMs) < 4000L
     }
 
     fun getLiveSpeedKmh(): Double {
@@ -213,7 +224,9 @@ object DashcamStatusStore {
                 "warning" to warning,
                 "isFrontCamera" to isFrontCamera,
                 "speedKmh" to liveSpeedKmh,
+                "hasGpsFix" to hasActiveGpsFix(),
                 "infinityFocus" to infinityFocus,
+                "videoOverlayMode" to videoOverlayMode,
             )
         )
     }
