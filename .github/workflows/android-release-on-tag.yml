@@ -19,19 +19,20 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.41.8'
 
       - name: Install dependencies
         run: flutter pub get
         working-directory: app
 
       - name: Build Android APK
-        run: flutter build apk --release --android-skip-build-dependency-validation
+        run: flutter build apk --release --verbose
         working-directory: app
 
       - name: Create Release and Upload Asset
