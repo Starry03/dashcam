@@ -95,6 +95,24 @@ class MainActivity : FlutterActivity() {
                     "getCacheDir" -> {
                         result.success(cacheDir.absolutePath)
                     }
+                    "canInstallPackages" -> {
+                        val allowed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            packageManager.canRequestPackageInstalls()
+                        } else {
+                            true
+                        }
+                        result.success(allowed)
+                    }
+                    "openInstallSettings" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            val intent = Intent(
+                                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                android.net.Uri.parse("package:$packageName")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                        }
+                        result.success(null)
+                    }
                     "installApk" -> {
                         val filePath = call.argument<String>("filePath")
                         if (filePath == null) {
@@ -107,6 +125,16 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                !packageManager.canRequestPackageInstalls()
+                            ) {
+                                result.error(
+                                    "INSTALL_PERMISSION_REQUIRED",
+                                    "Allow Dashcam to install unknown apps",
+                                    null
+                                )
+                                return@setMethodCallHandler
+                            }
                             val contentUri = androidx.core.content.FileProvider.getUriForFile(
                                 this,
                                 "$packageName.fileprovider",

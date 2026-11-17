@@ -195,6 +195,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
     if (!mounted) return;
 
+    final messenger = ScaffoldMessenger.of(context);
     var progress = 0.0;
     var statusText = 'Connecting to GitHub...';
     var hasError = false;
@@ -249,6 +250,23 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
                 if (dialogContext.mounted) {
                   Navigator.of(dialogContext).pop();
+                }
+
+                final canInstall =
+                    await DashcamPlatformBridge.canInstallPackages();
+                if (!canInstall) {
+                  await DashcamPlatformBridge.openInstallSettings();
+                  if (mounted) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Enable "Allow from this source", then reopen the update.',
+                        ),
+                        duration: Duration(seconds: 5),
+                      ),
+                    );
+                  }
+                  return;
                 }
 
                 await DashcamPlatformBridge.installApk(targetFile.path);

@@ -32,6 +32,10 @@ class DashcamPlatformBridge {
       _methods.invokeMethod('setVideoOverlayMode', {'mode': mode});
   static Future<String?> getCacheDir() =>
       _methods.invokeMethod<String>('getCacheDir');
+  static Future<bool> canInstallPackages() async =>
+      (await _methods.invokeMethod<bool>('canInstallPackages')) ?? false;
+  static Future<void> openInstallSettings() =>
+      _methods.invokeMethod('openInstallSettings');
   static Future<void> installApk(String filePath) =>
       _methods.invokeMethod('installApk', {'filePath': filePath});
   static Future<void> refreshStatus() => _methods.invokeMethod('refreshStatus');
