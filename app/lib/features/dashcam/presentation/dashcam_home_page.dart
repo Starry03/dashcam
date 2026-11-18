@@ -15,8 +15,9 @@ import '../services/github_release_service.dart';
 import '../domain/gps_status.dart';
 import 'widgets/control_panel.dart';
 import 'widgets/elapsed_timer.dart';
-import 'widgets/quick_actions_sheet.dart';
+import 'widgets/recording_status_header.dart';
 import 'widgets/speed_indicator.dart';
+import 'widgets/stat_card.dart';
 import 'widgets/warning_banner.dart';
 import 'widgets/vehicle_visualizer.dart';
 
@@ -42,6 +43,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   bool _infinityFocus = true;
   String _videoOverlayMode = 'subtitles';
   bool _dismissedWarning = false;
+
+  final GlobalKey<VehicleVisualizerState> _visualizerKey =
+      GlobalKey<VehicleVisualizerState>();
 
   @override
   void initState() {
@@ -74,7 +78,6 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     _installedVersion = info.version;
     setState(() => _appVersion = 'version ${info.version}');
 
-    // Run once after app startup to avoid repeated dialogs on hot states.
     if (!_didCheckUpdates) {
       _didCheckUpdates = true;
       unawaited(_checkForGithubUpdate());
@@ -153,19 +156,18 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 onPressed: () => Navigator.of(dialogContext).pop(false),
                 child: const Text('Later'),
               ),
-              FilledButton.icon(
-                icon: const Icon(Icons.download_rounded, size: 18),
+              FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                label: const Text('Install Now'),
+                child: const Text('Download & install'),
               ),
             ],
           );
         },
       );
 
-      if (!mounted || shouldUpdate != true) return;
-
-      await _downloadAndInstallApk(release);
+      if (shouldUpdate == true) {
+        await _downloadAndInstallApk(release);
+      }
     } catch (e) {
       if (manual && mounted) {
         ScaffoldMessenger.of(
@@ -176,266 +178,152 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   }
 
   Future<void> _downloadAndInstallApk(ReleaseInfo release) async {
-    final cacheDir = await DashcamPlatformBridge.getCacheDir();
-    if (cacheDir == null) {
-      final apkUri = Uri.tryParse(release.apkUrl);
-      if (apkUri != null && await canLaunchUrl(apkUri)) {
-        await launchUrl(apkUri, mode: LaunchMode.externalApplication);
+    final messenger = ScaffoldMessenger.of(context);
+    final downloadUrl = release.apkUrl;
+
+    if (downloadUrl.isEmpty) {
+      final uri = Uri.tryParse(release.htmlUrl);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
       return;
     }
 
-    final targetFile = File('$cacheDir/update_${release.version}.apk');
-    if (targetFile.existsSync()) {
-      try {
-        targetFile.deleteSync();
-      } catch (_) {}
-    }
+    final cancelToken = Completer<void>();
+    final progressNotifier = ValueNotifier<double?>(0.0);
+    final statusNotifier = ValueNotifier<String>('Starting download...');
 
-    if (!mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    var progress = 0.0;
-    var statusText = 'Connecting to GitHub...';
-    var hasError = false;
-    var errorMessage = '';
-    var started = false;
-
-    await showDialog<void>(
+    showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            void startDownload() async {
-              try {
-                final client = http.Client();
-                final request = http.Request('GET', Uri.parse(release.apkUrl));
-                final response = await client.send(request);
-
-                if (response.statusCode != 200) {
-                  throw Exception('HTTP error ${response.statusCode}');
-                }
-
-                final totalBytes = response.contentLength ?? 0;
-                var receivedBytes = 0;
-                final sink = targetFile.openWrite();
-
-                await response.stream.listen((chunk) {
-                  sink.add(chunk);
-                  receivedBytes += chunk.length;
-                  if (totalBytes > 0) {
-                    setModalState(() {
-                      progress = receivedBytes / totalBytes;
-                      final recMb = (receivedBytes / (1024 * 1024))
-                          .toStringAsFixed(1);
-                      final totMb = (totalBytes / (1024 * 1024))
-                          .toStringAsFixed(1);
-                      statusText =
-                          '$recMb MB / $totMb MB (${(progress * 100).toInt()}%)';
-                    });
-                  } else {
-                    setModalState(() {
-                      final recMb = (receivedBytes / (1024 * 1024))
-                          .toStringAsFixed(1);
-                      statusText = '$recMb MB downloaded';
-                    });
-                  }
-                }, cancelOnError: true).asFuture<void>();
-
-                await sink.flush();
-                await sink.close();
-                client.close();
-
-                if (dialogContext.mounted) {
-                  Navigator.of(dialogContext).pop();
-                }
-
-                final canInstall =
-                    await DashcamPlatformBridge.canInstallPackages();
-                if (!canInstall) {
-                  await DashcamPlatformBridge.openInstallSettings();
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Enable "Allow from this source", then reopen the update.',
-                        ),
-                        duration: Duration(seconds: 5),
-                      ),
-                    );
-                  }
-                  return;
-                }
-
-                await DashcamPlatformBridge.installApk(targetFile.path);
-              } catch (e) {
-                setModalState(() {
-                  hasError = true;
-                  errorMessage = '$e';
-                });
-              }
-            }
-
-            if (!started) {
-              started = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                startDownload();
-              });
-            }
-
-            return AlertDialog(
-              title: Text(hasError ? 'Download Failed' : 'Downloading Update'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!hasError) ...[
-                    LinearProgressIndicator(
-                      value: progress > 0 ? progress : null,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      statusText,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ] else ...[
-                    Text(
-                      'Failed to download the update:\n$errorMessage',
-                      style: const TextStyle(
-                        color: Colors.redAccent,
-                        fontSize: 13,
-                      ),
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('Updating Dashcam'),
+            content: ValueListenableBuilder<String>(
+              valueListenable: statusNotifier,
+              builder: (context, statusText, _) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(statusText),
+                    const SizedBox(height: 16),
+                    ValueListenableBuilder<double?>(
+                      valueListenable: progressNotifier,
+                      builder: (context, progress, _) {
+                        return LinearProgressIndicator(value: progress);
+                      },
                     ),
                   ],
-                ],
+                );
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (!cancelToken.isCompleted) {
+                    cancelToken.complete();
+                  }
+                  Navigator.of(dialogContext).pop();
+                },
+                child: const Text('Cancel'),
               ),
-              actions: [
-                if (hasError) ...[
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    onPressed: () async {
-                      Navigator.of(dialogContext).pop();
-                      final apkUri = Uri.tryParse(release.apkUrl);
-                      if (apkUri != null && await canLaunchUrl(apkUri)) {
-                        await launchUrl(
-                          apkUri,
-                          mode: LaunchMode.externalApplication,
-                        );
-                      }
-                    },
-                    child: const Text('Open in Browser'),
-                  ),
-                ] else ...[
-                  TextButton(
-                    onPressed: () {
-                      try {
-                        targetFile.deleteSync();
-                      } catch (_) {}
-                      Navigator.of(dialogContext).pop();
-                    },
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ],
+            ],
+          ),
+        );
+      },
+    );
+
+    File? tempFile;
+    try {
+      final cacheDirPath = await DashcamPlatformBridge.getCacheDir();
+      final apkName = 'dashcam-${release.tag}.apk';
+      tempFile = File('$cacheDirPath/$apkName');
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(downloadUrl));
+      request.headers['Accept'] = 'application/octet-stream';
+      request.headers['User-Agent'] = 'Dashcam-App';
+
+      final response = await client.send(request);
+      final totalBytes = response.contentLength ?? 0;
+      var receivedBytes = 0;
+
+      final sink = tempFile.openWrite();
+      var cancelled = false;
+
+      final streamSubscription = response.stream.listen(
+        (chunk) {
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          if (totalBytes > 0) {
+            progressNotifier.value = receivedBytes / totalBytes;
+            final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(
+              1,
             );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _toggleCamera() async {
-    if (_status.isRecording || _busy) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stop recording to change camera lens')),
+            final mbTotal = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
+            statusNotifier.value = 'Downloading: $mbReceived MB / $mbTotal MB';
+          }
+        },
+        onDone: () {},
+        onError: (e) {
+          throw e;
+        },
+        cancelOnError: true,
       );
-      return;
-    }
-    setState(() => _isFrontCamera = !_isFrontCamera);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isFrontCamera', _isFrontCamera);
-    await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
-  }
 
-  Future<void> _changeLoopRecording() async {
-    final values = [0, 5, 10, 15, 30];
-    final labels = [
-      'Off (Save All)',
-      'Last 5 Minutes',
-      'Last 10 Minutes',
-      'Last 15 Minutes',
-      'Last 30 Minutes',
-    ];
-    final selected = await showDialog<int>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Loop Recording'),
-          content: RadioGroup<int>(
-            groupValue: _loopRecordingMinutes,
-            onChanged: (val) => Navigator.of(context).pop(val),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(values.length, (i) {
-                return RadioListTile<int>(
-                  title: Text(labels[i]),
-                  value: values[i],
-                );
-              }),
-            ),
-          ),
-        );
-      },
-    );
-    if (selected != null && selected != _loopRecordingMinutes) {
-      setState(() => _loopRecordingMinutes = selected);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('loopRecordingMinutes', selected);
-      await DashcamPlatformBridge.setLoopRecordingMinutes(selected);
+      await Future.any([
+        streamSubscription.asFuture<void>(),
+        cancelToken.future.then((_) {
+          cancelled = true;
+          streamSubscription.cancel();
+        }),
+      ]);
+
+      await sink.flush();
+      await sink.close();
+      client.close();
+
+      if (cancelled) {
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+        return;
+      }
+
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
+      statusNotifier.value = 'Launching installer...';
+      await DashcamPlatformBridge.installApk(tempFile.path);
+    } catch (e) {
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('Download or install failed: $e')),
+      );
     }
   }
 
-  Future<void> _changeOverlayMode() async {
-    final values = ['subtitles', 'burnin', 'none'];
-    final labels = [
-      'Subtitles Track (No Heat - Recommended)',
-      'Burn-in on Video (High CPU / Heat)',
-      'Off (No Text Overlay)',
-    ];
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Video Overlay'),
-          content: RadioGroup<String>(
-            groupValue: _videoOverlayMode,
-            onChanged: (val) => Navigator.of(context).pop(val),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(values.length, (i) {
-                return RadioListTile<String>(
-                  title: Text(labels[i]),
-                  value: values[i],
-                );
-              }),
-            ),
-          ),
-        );
-      },
-    );
-    if (selected != null && selected != _videoOverlayMode) {
-      setState(() => _videoOverlayMode = selected);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('videoOverlayMode', selected);
-      await DashcamPlatformBridge.setVideoOverlayMode(selected);
+  void _startStatusRefreshTicker() {
+    _statusRefreshTimer?.cancel();
+    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      unawaited(DashcamPlatformBridge.refreshStatus());
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(DashcamPlatformBridge.refreshStatus());
     }
   }
 
@@ -447,15 +335,34 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     super.dispose();
   }
 
-  void _startStatusRefreshTicker() {
-    _statusRefreshTimer?.cancel();
-    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      unawaited(DashcamPlatformBridge.refreshStatus());
-    });
+  Future<void> _toggleCamera() async {
+    if (_busy || _status.isRecording) return;
+    final next = !_isFrontCamera;
+    setState(() => _isFrontCamera = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isFrontCamera', next);
+    await DashcamPlatformBridge.setCameraLens(next);
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {}
+  Future<void> _changeLoopRecording() async {
+    const modes = [0, 5, 10, 15, 30];
+    final nextIndex = (modes.indexOf(_loopRecordingMinutes) + 1) % modes.length;
+    final nextValue = modes[nextIndex];
+    setState(() => _loopRecordingMinutes = nextValue);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('loopRecordingMinutes', nextValue);
+    await DashcamPlatformBridge.setLoopRecordingMinutes(nextValue);
+  }
+
+  Future<void> _changeOverlayMode() async {
+    const modes = ['subtitles', 'burnin', 'none'];
+    final nextIndex = (modes.indexOf(_videoOverlayMode) + 1) % modes.length;
+    final nextValue = modes[nextIndex];
+    setState(() => _videoOverlayMode = nextValue);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('videoOverlayMode', nextValue);
+    await DashcamPlatformBridge.setVideoOverlayMode(nextValue);
+  }
 
   Future<void> _toggleRecording() async {
     if (_busy) return;
@@ -533,200 +440,177 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     await DashcamPlatformBridge.setInfinityFocus(enabled);
   }
 
-  final GlobalKey<VehicleVisualizerState> _visualizerKey =
-      GlobalKey<VehicleVisualizerState>();
-
-  Future<void> _openPhoneSettingsSheet() {
-    return showPhoneSettingsSheet(
-      context,
-      freeStorageMb: _status.freeStorageMb,
-      appVersion: _appVersion,
-      loopRecordingMinutes: _loopRecordingMinutes,
-      onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
-      onOpenGallery: () => unawaited(_openGallery()),
-      onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final isRec = _status.isRecording;
-    final isPaused = _status.isPaused;
-
     return Scaffold(
-      body: AnimatedContainer(
-        duration: const Duration(milliseconds: 600),
-        decoration: BoxDecoration(
-          gradient: RadialGradient(
-            center: const Alignment(0, -0.25),
-            radius: 1.15,
-            colors: isRec
-                ? const [
-                    Color(0x22EF4444),
-                    Color(0x0C38BDF8),
-                    Color(0xFF06080C),
-                  ]
-                : const [
-                    Color(0x1F38BDF8),
-                    Color(0x0638BDF8),
-                    Color(0xFF06080C),
-                  ],
-            stops: const [0.0, 0.40, 0.85],
-          ),
-        ),
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight - 20,
+      backgroundColor: const Color(0xFF121212),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 10.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Top Status Header (● READY / ● RECORDING / ● PAUSED)
+              RecordingStatusHeader(
+                isRecording: _status.isRecording,
+                isPaused: _status.isPaused,
+              ),
+              const SizedBox(height: 8),
+
+              // Elapsed Recording Timer (00:00:00)
+              ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
+              const SizedBox(height: 6),
+
+              // Speed & GPS Indicator
+              SpeedIndicator(
+                speedKmh: _status.speedKmh,
+                gpsStatus: _status.hasGpsFix
+                    ? GpsUiStatus.active
+                    : GpsUiStatus.weakSignal,
+              ),
+              const SizedBox(height: 4),
+
+              // 3D Automotive Visualizer (Rendered directly on single window)
+              Expanded(
+                child: VehicleVisualizer(
+                  key: _visualizerKey,
+                  isRecording: _status.isRecording,
+                  isPaused: _status.isPaused,
+                  speedKmh: _status.speedKmh,
+                  isFrontCamera: _isFrontCamera,
+                  infinityFocus: _infinityFocus,
+                  videoOverlayMode: _videoOverlayMode,
+                  loopRecordingMinutes: _loopRecordingMinutes,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // In-line Quick Settings Strip (All on one single window)
+              Row(
+                children: [
+                  Expanded(
+                    child: _QuickSettingChip(
+                      icon: _isFrontCamera
+                          ? Icons.camera_front_rounded
+                          : Icons.camera_rear_rounded,
+                      label: 'Lens',
+                      value: _isFrontCamera ? 'Front' : 'Rear',
+                      enabled: !_status.isRecording,
+                      onTap: () => unawaited(_toggleCamera()),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Top HUD Row (HTML lines 133-154)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          // Reset 3D Camera View Button
-                          _TopIconButton(
-                            icon: Icons.view_in_ar_rounded,
-                            tooltip: 'Centra vista 3D',
-                            onTap: () =>
-                                _visualizerKey.currentState?.resetCamera(),
-                          ),
-                          // Center Status Pill
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xCC111621),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isRec
-                                    ? const Color(0x80EF4444)
-                                    : (isPaused
-                                          ? const Color(0x80F59E0B)
-                                          : Colors.white.withValues(
-                                              alpha: 0.10,
-                                            )),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: isRec
-                                        ? const Color(0xFFEF4444)
-                                        : (isPaused
-                                              ? const Color(0xFFF59E0B)
-                                              : const Color(0xFF94A3B8)),
-                                  ),
-                                ),
-                                const SizedBox(width: 7),
-                                Text(
-                                  isRec
-                                      ? 'REC'
-                                      : (isPaused ? 'PAUSED' : 'READY'),
-                                  style: TextStyle(
-                                    color: isRec
-                                        ? const Color(0xFFEF4444)
-                                        : (isPaused
-                                              ? const Color(0xFFF59E0B)
-                                              : const Color(0xFFCBD5E1)),
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 2.0,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Phone Settings Button
-                          _TopIconButton(
-                            icon: Icons.settings_suggest_rounded,
-                            tooltip: 'Impostazioni Telefono',
-                            onTap: () => unawaited(_openPhoneSettingsSheet()),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
-                      const SizedBox(height: 8),
-                      SpeedIndicator(
-                        speedKmh: _status.speedKmh,
-                        gpsStatus: _status.hasGpsFix
-                            ? GpsUiStatus.active
-                            : GpsUiStatus.weakSignal,
-                      ),
-                      const SizedBox(height: 6),
-                      SizedBox(
-                        height: 310,
-                        child: VehicleVisualizer(
-                          key: _visualizerKey,
-                          isRecording: _status.isRecording,
-                          isPaused: _status.isPaused,
-                          speedKmh: _status.speedKmh,
-                          isFrontCamera: _isFrontCamera,
-                          infinityFocus: _infinityFocus,
-                          videoOverlayMode: _videoOverlayMode,
-                          loopRecordingMinutes: _loopRecordingMinutes,
-                          onSwitchLens: () => unawaited(_toggleCamera()),
-                          onToggleInfinityFocus: (value) =>
-                              unawaited(_toggleInfinityFocus(value)),
-                          onChangeOverlayMode: () =>
-                              unawaited(_changeOverlayMode()),
-                          onChangeLoopRecording: () =>
-                              unawaited(_changeLoopRecording()),
-                          onOpenGallery: () => unawaited(_openGallery()),
-                        ),
-                      ),
-                      if (_status.warning.isNotEmpty && !_dismissedWarning ||
-                          _error.isNotEmpty) ...[
-                        WarningBanner(
-                          message: _error.isNotEmpty ? _error : _status.warning,
-                          onDismiss: () => setState(() {
-                            if (_error.isNotEmpty) {
-                              _error = '';
-                            } else {
-                              _dismissedWarning = true;
-                            }
-                          }),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      ControlPanel(
-                        isRecording: _status.isRecording,
-                        isPaused: _status.isPaused,
-                        busy: _busy,
-                        onToggleRecording: () => unawaited(_toggleRecording()),
-                        onTogglePause: () => unawaited(_togglePause()),
-                        onLock: () => unawaited(_lockIncident()),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _appVersion,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white24,
-                          fontSize: 9,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _QuickSettingChip(
+                      icon: Icons.all_inclusive_rounded,
+                      label: 'Focus',
+                      value: _infinityFocus ? 'Infinity' : 'Auto',
+                      active: _infinityFocus,
+                      onTap: () =>
+                          unawaited(_toggleInfinityFocus(!_infinityFocus)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _QuickSettingChip(
+                      icon: Icons.layers_rounded,
+                      label: 'Overlay',
+                      value: _videoOverlayMode == 'subtitles'
+                          ? 'Subtitles'
+                          : (_videoOverlayMode == 'burnin' ? 'Burn-in' : 'Off'),
+                      onTap: () => unawaited(_changeOverlayMode()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _QuickSettingChip(
+                      icon: Icons.loop_rounded,
+                      label: 'Loop',
+                      value: _loopRecordingMinutes == 0
+                          ? 'Off'
+                          : '${_loopRecordingMinutes}m',
+                      onTap: () => unawaited(_changeLoopRecording()),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Free Storage & Last Clip Telemetry Row
+              Row(
+                children: [
+                  Expanded(
+                    child: StatCard(
+                      label: 'Free Storage',
+                      value: _status.freeStorageMb >= 1024
+                          ? '${(_status.freeStorageMb / 1024).toStringAsFixed(1)} GB'
+                          : '${_status.freeStorageMb} MB',
+                      icon: Icons.storage_rounded,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: StatCard(
+                      label: 'Last Clip',
+                      value: _status.lastSegment == '-'
+                          ? 'None'
+                          : _status.lastSegment,
+                      icon: Icons.video_file_rounded,
+                      onTap: () => unawaited(_openGallery()),
+                      trailing: _status.lastSegmentLocked
+                          ? const Icon(
+                              Icons.shield,
+                              color: Colors.orange,
+                              size: 16,
+                            )
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+
+              // Optional Warnings or Errors
+              if (_status.warning.isNotEmpty && !_dismissedWarning ||
+                  _error.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                WarningBanner(
+                  message: _error.isNotEmpty ? _error : _status.warning,
+                  onDismiss: () => setState(() {
+                    if (_error.isNotEmpty) {
+                      _error = '';
+                    } else {
+                      _dismissedWarning = true;
+                    }
+                  }),
+                ),
+              ],
+              const SizedBox(height: 10),
+
+              // Primary Action Control Panel (Start, Stop, Lock Incident, Pause)
+              ControlPanel(
+                isRecording: _status.isRecording,
+                isPaused: _status.isPaused,
+                busy: _busy,
+                onToggleRecording: () => unawaited(_toggleRecording()),
+                onTogglePause: () => unawaited(_togglePause()),
+                onLock: () => unawaited(_lockIncident()),
+              ),
+              const SizedBox(height: 8),
+
+              // Version & Check Updates
+              GestureDetector(
+                onTap: () => unawaited(_checkForGithubUpdate(manual: true)),
+                child: Text(
+                  _appVersion,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white30,
+                    fontSize: 10,
+                    letterSpacing: 0.8,
                   ),
                 ),
-              );
-            },
+              ),
+            ],
           ),
         ),
       ),
@@ -734,33 +618,78 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   }
 }
 
-class _TopIconButton extends StatelessWidget {
-  const _TopIconButton({required this.icon, required this.onTap, this.tooltip});
+// ============================================================================
+// COMPACT IN-LINE QUICK SETTING CHIP (ON MAIN SCREEN, NO POPUP WINDOWS)
+// ============================================================================
+
+class _QuickSettingChip extends StatelessWidget {
+  const _QuickSettingChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.active = false,
+    this.enabled = true,
+    required this.onTap,
+  });
 
   final IconData icon;
+  final String label;
+  final String value;
+  final bool active;
+  final bool enabled;
   final VoidCallback onTap;
-  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    final button = InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: const Color(0xCC151A20),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withAlpha(20)),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E1E),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: active
+                  ? const Color(0xFF38BDF8)
+                  : Colors.white.withAlpha(22),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: enabled
+                    ? (active ? const Color(0xFF38BDF8) : Colors.white70)
+                    : Colors.white24,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: enabled ? Colors.white : Colors.white38,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
-        child: Icon(icon, size: 18, color: const Color(0xFFB7C4CA)),
       ),
     );
-
-    if (tooltip != null) {
-      return Tooltip(message: tooltip!, child: button);
-    }
-    return button;
   }
 }

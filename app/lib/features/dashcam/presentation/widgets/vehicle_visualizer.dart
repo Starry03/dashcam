@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 // ============================================================================
-// 3D MATH PRIMITIVES (EXACT MATCH FOR THREE.JS VECTOR & PERSPECTIVE CAMERA)
+// 3D MATH PRIMITIVES (PERSPECTIVE CAMERA MATH)
 // ============================================================================
 
 class _Vec2 {
@@ -46,8 +46,6 @@ class _Camera3D {
     required this.width,
     required this.height,
   }) {
-    // Exact Three.js Camera from HTML lines 1060 & 1283-1287:
-    // radius = 6.3, lookAt = (0, 0.12, 0), vertical FOV = 36 deg
     const radius = 6.3;
     final cx = math.sin(camAngleY) * math.cos(camAngleX) * radius;
     final cy = math.sin(camAngleX) * radius + 0.25;
@@ -98,7 +96,7 @@ class _Camera3D {
 }
 
 // ============================================================================
-// CAR SILHOUETTE GEOMETRY (EXACT THREE.JS SHAPE SAMPLE FROM HTML LINES 1095-1104)
+// CAR SILHOUETTE GEOMETRY (SCULPTED CURVES APPROVED BY USER)
 // ============================================================================
 
 List<_Vec2> _buildCarSilhouette() {
@@ -107,7 +105,6 @@ List<_Vec2> _buildCarSilhouette() {
     const _Vec2(2.15, -0.22), // 1: Front splitter bottom
   ];
 
-  // Helper to sample quadratic curves exactly like Three.js quadraticCurveTo
   void sampleQuad(_Vec2 p0, _Vec2 p1, _Vec2 p2, int count) {
     for (var i = 1; i <= count; i++) {
       final t = i / count;
@@ -160,7 +157,7 @@ List<_Vec2> _buildCarSilhouette() {
 final List<_Vec2> _kCarSilhouette = _buildCarSilhouette();
 
 // ============================================================================
-// VEHICLE VISUALIZER WIDGET
+// VEHICLE VISUALIZER WIDGET (SEAMLESS 3D CANVAS, NO SUB-WINDOWS)
 // ============================================================================
 
 class VehicleVisualizer extends StatefulWidget {
@@ -173,11 +170,6 @@ class VehicleVisualizer extends StatefulWidget {
     required this.infinityFocus,
     required this.videoOverlayMode,
     required this.loopRecordingMinutes,
-    required this.onSwitchLens,
-    required this.onToggleInfinityFocus,
-    required this.onChangeOverlayMode,
-    required this.onChangeLoopRecording,
-    required this.onOpenGallery,
     this.onResetCamera,
   });
 
@@ -188,11 +180,6 @@ class VehicleVisualizer extends StatefulWidget {
   final bool infinityFocus;
   final String videoOverlayMode;
   final int loopRecordingMinutes;
-  final VoidCallback onSwitchLens;
-  final ValueChanged<bool> onToggleInfinityFocus;
-  final VoidCallback onChangeOverlayMode;
-  final VoidCallback onChangeLoopRecording;
-  final VoidCallback onOpenGallery;
   final VoidCallback? onResetCamera;
 
   @override
@@ -204,7 +191,6 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
   late final AnimationController _pulseController;
   late final Ticker _smoothTicker;
 
-  // Angles exactly initialized as in HTML lines 1040-1043
   double _camAngleY = -0.52;
   double _camAngleX = 0.32;
   double _targetCamAngleY = -0.52;
@@ -212,19 +198,15 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
 
   double _dragVelocityY = 0.0;
   bool _isDragging = false;
-  String? _activeZone; // 'front' or 'cabin'
-
   Duration _lastTickTime = Duration.zero;
 
   @override
   void initState() {
     super.initState();
-
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2200),
     )..repeat();
-
     _smoothTicker = createTicker(_onTick)..start();
   }
 
@@ -240,7 +222,6 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
       _targetCamAngleY = -0.52;
       _targetCamAngleX = 0.32;
       _dragVelocityY = 0.0;
-      _activeZone = null;
     });
   }
 
@@ -251,18 +232,14 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
     _lastTickTime = elapsed;
     final clampedDt = dtSec.clamp(0.001, 0.04);
 
-    // Idle ambient drift when not dragging (HTML line 1276)
-    if (!_isDragging && _activeZone == null) {
+    if (!_isDragging) {
       _targetCamAngleY += 0.0018 * (clampedDt / 0.016);
-
-      // Inertia momentum decay
       if (_dragVelocityY.abs() > 0.0001) {
         _targetCamAngleY += _dragVelocityY * clampedDt;
         _dragVelocityY *= math.pow(0.90, clampedDt / 0.016);
       }
     }
 
-    // Smooth exponential damping (Three.js 0.08 easing factor)
     final easeFactor = 1.0 - math.pow(1.0 - 0.08, clampedDt / 0.016);
     final diffY = (_targetCamAngleY - _camAngleY) * easeFactor;
     final diffX = (_targetCamAngleX - _camAngleX) * easeFactor;
@@ -275,204 +252,80 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
     }
   }
 
-  void _toggleFrontOptics() {
-    setState(() {
-      if (_activeZone == 'front') {
-        _activeZone = null;
-      } else {
-        _activeZone = 'front';
-        _targetCamAngleY = -0.62;
-        _targetCamAngleX = 0.28;
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final moving =
         widget.isRecording && !widget.isPaused && widget.speedKmh > 1;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final h = constraints.maxHeight;
-
-        final camera = _Camera3D(
-          camAngleY: _camAngleY,
-          camAngleX: _camAngleX,
-          width: w,
-          height: h,
-        );
-        final pFront =
-            camera.project(const _Vec3(0.85, 0.62, 0.35)) ??
-            Offset(w * 0.68, h * 0.45);
-
-        final clampedFrontX = pFront.dx.clamp(20.0, w - 165.0);
-        final clampedFrontY = pFront.dy.clamp(24.0, h - 85.0);
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            decoration: const BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment(0, -0.15),
-                radius: 1.05,
-                colors: [
-                  Color(0x1F38BDF8),
-                  Color(0x0638BDF8),
-                  Color(0xF006080C),
-                ],
-                stops: [0.0, 0.38, 0.85],
-              ),
-            ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // ------------------------------------------------------------
-                // 3D THREE.JS WEBGL REPLICATOR CANVAS & GESTURE RECOGNIZER
-                // ------------------------------------------------------------
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) {
-                    _isDragging = true;
-                    _dragVelocityY = 0.0;
-                  },
-                  onPanUpdate: (details) {
-                    // Exact sensitivity from HTML lines 1220-1221
-                    final dx = details.delta.dx;
-                    final dy = details.delta.dy;
-                    _targetCamAngleY -= dx * 0.0085;
-                    _targetCamAngleX = (_targetCamAngleX + dy * 0.0065).clamp(
-                      0.12,
-                      0.95,
-                    );
-                    _dragVelocityY = -dx * 0.12;
-                  },
-                  onPanEnd: (_) {
-                    _isDragging = false;
-                  },
-                  child: CustomPaint(
-                    painter: _VehiclePainter(
-                      camAngleY: _camAngleY,
-                      camAngleX: _camAngleX,
-                      pulseValue: _pulseController.value,
-                      wheelRotation: moving
-                          ? (DateTime.now().millisecondsSinceEpoch * 0.015)
-                          : 0.0,
-                      isRecording: widget.isRecording,
-                      isPaused: widget.isPaused,
-                      moving: moving,
-                      isFrontCamera: widget.isFrontCamera,
-                      infinityFocus: widget.infinityFocus,
-                      loopRecordingMinutes: widget.loopRecordingMinutes,
-                      videoOverlayMode: widget.videoOverlayMode,
-                    ),
-                  ),
-                ),
-
-                // ------------------------------------------------------------
-                // TOP HORIZON HINT & RESET CAMERA BUTTON (HTML lines 135 & 184)
-                // ------------------------------------------------------------
-                Positioned(
-                  top: 10,
-                  left: 14,
-                  child: GestureDetector(
-                    onTap: resetCamera,
-                    child: Container(
-                      padding: const EdgeInsets.all(7),
-                      decoration: BoxDecoration(
-                        color: const Color(0x99111621),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.12),
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.view_in_ar_rounded,
-                        size: 16,
-                        color: Color(0xFF38BDF8),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 12,
-                  right: 14,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3.5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.06),
-                      ),
-                    ),
-                    child: const Text(
-                      '360° SPATIAL VIEW',
-                      style: TextStyle(
-                        color: Color(0xFF64748B),
-                        fontSize: 8.5,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ),
-                ),
-
-                // ------------------------------------------------------------
-                // SPATIAL HOTSPOT 1: FRONT CAM (HTML lines 188-201 & SCREENSHOT)
-                // ------------------------------------------------------------
-                Positioned(
-                  left: clampedFrontX,
-                  top: clampedFrontY,
-                  child: FractionalTranslation(
-                    translation: const Offset(-0.10, -0.5),
-                    child: _SpatialHotspotButton(
-                      title: 'FRONT CAM',
-                      badgeText: widget.isFrontCamera ? 'Front' : 'Rear',
-                      subtitle: 'Ottica & Focus',
-                      accentColor: const Color(0xFF38BDF8),
-                      active: _activeZone == 'front',
-                      pulseValue: _pulseController.value,
-                      onTap: _toggleFrontOptics,
-                    ),
-                  ),
-                ),
-
-                // ------------------------------------------------------------
-                // SPATIAL QUICK CARD POPUP (Ottica & Focus)
-                // ------------------------------------------------------------
-                if (_activeZone == 'front')
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: 8,
-                    child: _FrontOpticsQuickCard(
-                      isRecording: widget.isRecording,
-                      isFrontCamera: widget.isFrontCamera,
-                      infinityFocus: widget.infinityFocus,
-                      videoOverlayMode: widget.videoOverlayMode,
-                      onSwitchLens: widget.onSwitchLens,
-                      onToggleInfinityFocus: widget.onToggleInfinityFocus,
-                      onChangeOverlayMode: widget.onChangeOverlayMode,
-                      onClose: () => setState(() => _activeZone = null),
-                    ),
-                  ),
-              ],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (_) {
+            _isDragging = true;
+            _dragVelocityY = 0.0;
+          },
+          onPanUpdate: (details) {
+            final dx = details.delta.dx;
+            final dy = details.delta.dy;
+            _targetCamAngleY -= dx * 0.0085;
+            _targetCamAngleX = (_targetCamAngleX + dy * 0.0065).clamp(
+              0.12,
+              0.95,
+            );
+            _dragVelocityY = -dx * 0.12;
+          },
+          onPanEnd: (_) {
+            _isDragging = false;
+          },
+          child: CustomPaint(
+            painter: _VehiclePainter(
+              camAngleY: _camAngleY,
+              camAngleX: _camAngleX,
+              pulseValue: _pulseController.value,
+              wheelRotation: moving
+                  ? (DateTime.now().millisecondsSinceEpoch * 0.015)
+                  : 0.0,
+              isRecording: widget.isRecording,
+              isPaused: widget.isPaused,
+              moving: moving,
+              isFrontCamera: widget.isFrontCamera,
+              infinityFocus: widget.infinityFocus,
+              loopRecordingMinutes: widget.loopRecordingMinutes,
+              videoOverlayMode: widget.videoOverlayMode,
             ),
           ),
-        );
-      },
+        ),
+
+        // Subtle Reset Camera View Button
+        Positioned(
+          top: 6,
+          left: 6,
+          child: GestureDetector(
+            onTap: resetCamera,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0x551E1E1E),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: const Icon(
+                Icons.view_in_ar_rounded,
+                size: 15,
+                color: Colors.white54,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
 // ============================================================================
-// SPATIAL VEHICLE CUSTOM PAINTER (SCULPTED 3D MESH WITH TRUE PERSPECTIVE)
+// SPATIAL VEHICLE CUSTOM PAINTER (TRUE 3D SCULPTED AUTOMOTIVE MESH)
 // ============================================================================
 
 class _VehiclePainter extends CustomPainter {
@@ -514,7 +367,7 @@ class _VehiclePainter extends CustomPainter {
     Offset? proj(_Vec3 p) => camera.project(p);
 
     // ------------------------------------------------------------------------
-    // 1. FLOOR GRID & SPATIAL RADAR HALO RING (HTML lines 1079-1088)
+    // 1. FLOOR GRID & RADAR HALO RING
     // ------------------------------------------------------------------------
     const floorY = -0.62;
     final gridPaint = Paint()
@@ -533,7 +386,7 @@ class _VehiclePainter extends CustomPainter {
       if (p3 != null && p4 != null) canvas.drawLine(p3, p4, gridPaint);
     }
 
-    // Spatial Radar Halo Ring (RingGeometry radius 2.37 at y = -0.61)
+    // Halo ground ring
     const haloRadius = 2.37;
     final haloPath = Path();
     var firstPt = true;
@@ -551,7 +404,6 @@ class _VehiclePainter extends CustomPainter {
         }
       }
     }
-    // Ambient cyan halo ring
     canvas.drawPath(
       haloPath,
       Paint()
@@ -560,7 +412,7 @@ class _VehiclePainter extends CustomPainter {
         ..color = const Color(0xFF38BDF8).withValues(alpha: 0.28),
     );
 
-    // If loop recording is active, display segmented loop buffer arcs
+    // Segmented loop buffer arcs (cool cyan, no green)
     if (loopRecordingMinutes > 0) {
       final activeArcPaint = Paint()
         ..style = PaintingStyle.stroke
@@ -597,7 +449,7 @@ class _VehiclePainter extends CustomPainter {
     }
 
     // ------------------------------------------------------------------------
-    // 2. SOFT GROUND SHADOW BENEATH CAR
+    // 2. SOFT GROUND SHADOW
     // ------------------------------------------------------------------------
     final groundShadow = [
       proj(const _Vec3(-2.2, floorY, -0.92)),
@@ -616,9 +468,8 @@ class _VehiclePainter extends CustomPainter {
     }
 
     // ------------------------------------------------------------------------
-    // 3. SCULPTED 3D CAR BODY (EXTRUDE GEOMETRY FROM THREE.JS)
+    // 3. SCULPTED 3D CAR BODY (EXTRUDE SILHOUETTE APPROVED BY USER)
     // ------------------------------------------------------------------------
-    // Profile points from Three.js carShape
     final profile = _kCarSilhouette;
 
     void drawPolygon(
@@ -648,19 +499,17 @@ class _VehiclePainter extends CustomPainter {
       }
     }
 
-    // Three.js body colors & metallic highlights
-    const bodyBaseColor = Color(0xFF0F172A); // Obsidian slate 0x0F172A
-    const bodyTopColor = Color(0xFF162238); // Specular top reflection
-    const bodySideColor = Color(0xFF0D1424); // Side shadow
-    const wireColor = Color(0x5538BDF8); // Edge wireframe 0x38BDF8 opacity 0.34
-    const contourColor = Color(0x9938BDF8); // Crisp character contour
+    const bodyBaseColor = Color(0xFF0F172A);
+    const bodyTopColor = Color(0xFF162238);
+    const bodySideColor = Color(0xFF0D1424);
+    const wireColor = Color(0x5538BDF8);
+    const contourColor = Color(0x9938BDF8);
 
-    // Determine camera vantage relative to car sides (Z axis)
     final camSide = camera.position.z >= 0 ? 1.0 : -1.0;
     final farSideZ = -camSide * 0.88;
     final nearSideZ = camSide * 0.88;
 
-    // Draw Far Side Wall first
+    // Far Side Wall
     final farWall = profile.map((p) => _Vec3(p.x, p.y, farSideZ)).toList();
     drawPolygon(
       farWall,
@@ -669,7 +518,7 @@ class _VehiclePainter extends CustomPainter {
       strokeWidth: 1.0,
     );
 
-    // Draw Belly Plate
+    // Belly Plate
     drawPolygon(
       [
         _Vec3(-2.15, -0.22, -0.78),
@@ -681,7 +530,7 @@ class _VehiclePainter extends CustomPainter {
       stroke: const Color(0x2538BDF8),
     );
 
-    // Draw Extruded Facets along the curved profile
+    // Extruded Facets along profile
     for (var i = 0; i < profile.length - 1; i++) {
       final p1 = profile[i];
       final p2 = profile[i + 1];
@@ -693,12 +542,11 @@ class _VehiclePainter extends CustomPainter {
         _Vec3(p2.x, p2.y, -0.78),
       ];
 
-      // Lighting gradient based on elevation & surface normal
       Color facetColor;
       if (p1.y > 0.4) {
-        facetColor = bodyTopColor; // Windshield & roof
+        facetColor = bodyTopColor;
       } else if (p1.y > 0.1 && p1.x > 0.8) {
-        facetColor = const Color(0xFF182840); // Hood
+        facetColor = const Color(0xFF182840);
       } else {
         facetColor = bodyBaseColor;
       }
@@ -706,7 +554,7 @@ class _VehiclePainter extends CustomPainter {
       drawPolygon(quadPts, facetColor, stroke: wireColor, strokeWidth: 1.0);
     }
 
-    // Draw Near Side Wall
+    // Near Side Wall
     final nearWall = profile.map((p) => _Vec3(p.x, p.y, nearSideZ)).toList();
     drawPolygon(
       nearWall,
@@ -716,9 +564,8 @@ class _VehiclePainter extends CustomPainter {
     );
 
     // ------------------------------------------------------------------------
-    // 4. PANORAMIC GLASS CANOPY OVERLAY (HTML lines 1136-1146)
+    // 4. PANORAMIC GLASS CANOPY OVERLAY
     // ------------------------------------------------------------------------
-    // BoxGeometry(1.75, 0.36, 1.38) at (-0.18, 0.56, 0)
     final cabinPts = [
       const _Vec3(-1.055, 0.38, -0.69),
       const _Vec3(0.695, 0.38, -0.69),
@@ -730,21 +577,18 @@ class _VehiclePainter extends CustomPainter {
       const _Vec3(-1.055, 0.74, 0.69),
     ];
 
-    // Roof glass
     drawPolygon(
       [cabinPts[3], cabinPts[2], cabinPts[6], cabinPts[7]],
       const Color(0x3E38BDF8),
       stroke: const Color(0x8838BDF8),
       strokeWidth: 1.2,
     );
-    // Windshield glass
     drawPolygon(
       [cabinPts[1], cabinPts[2], cabinPts[6], cabinPts[5]],
       const Color(0x4C38BDF8),
       stroke: const Color(0xCC38BDF8),
       strokeWidth: 1.4,
     );
-    // Rear fastback glass
     drawPolygon(
       [cabinPts[0], cabinPts[3], cabinPts[7], cabinPts[4]],
       const Color(0x3E38BDF8),
@@ -753,16 +597,15 @@ class _VehiclePainter extends CustomPainter {
     );
 
     // ------------------------------------------------------------------------
-    // 5. 4 AERODYNAMIC WHEELS IN TRUE 3D PERSPECTIVE (HTML lines 1162-1183)
+    // 5. 4 AERODYNAMIC WHEELS IN TRUE 3D PERSPECTIVE
     // ------------------------------------------------------------------------
     final wheelPositions = [
-      const _Vec3(1.36, -0.26, 0.86), // Front Right
-      const _Vec3(1.36, -0.26, -0.86), // Front Left
-      const _Vec3(-1.36, -0.26, 0.86), // Rear Right
-      const _Vec3(-1.36, -0.26, -0.86), // Rear Left
+      const _Vec3(1.36, -0.26, 0.86),
+      const _Vec3(1.36, -0.26, -0.86),
+      const _Vec3(-1.36, -0.26, 0.86),
+      const _Vec3(-1.36, -0.26, -0.86),
     ];
 
-    // Sort wheels back to front for proper depth occlusion
     final sortedWheels = List<_Vec3>.from(wheelPositions)
       ..sort((a, b) => camera.depth(b).compareTo(camera.depth(a)));
 
@@ -770,7 +613,6 @@ class _VehiclePainter extends CustomPainter {
       final wzSign = wc.z >= 0 ? 1.0 : -1.0;
       final rimZ = wc.z + (wzSign * 0.125);
 
-      // 1. Dark Tire Cylinder (radius 0.36) projected as true 3D ellipse
       final tirePath = Path();
       var isFirstTire = true;
       for (var a = 0; a <= 20; a++) {
@@ -797,7 +639,6 @@ class _VehiclePainter extends CustomPainter {
           ..color = const Color(0xFF1E293B),
       );
 
-      // 2. Glowing Cyan Rim Ring (RingGeometry radius 0.18-0.24, color 0x38BDF8 opacity 0.55)
       final rimPath = Path();
       var isFirstRim = true;
       for (var a = 0; a <= 20; a++) {
@@ -816,7 +657,6 @@ class _VehiclePainter extends CustomPainter {
       }
       rimPath.close();
 
-      // Outer glow
       canvas.drawPath(
         rimPath,
         Paint()
@@ -824,7 +664,6 @@ class _VehiclePainter extends CustomPainter {
           ..strokeWidth = 3.6
           ..color = const Color(0xFF38BDF8).withValues(alpha: 0.55),
       );
-      // Sharp core
       canvas.drawPath(
         rimPath,
         Paint()
@@ -833,7 +672,6 @@ class _VehiclePainter extends CustomPainter {
           ..color = const Color(0xFF38BDF8),
       );
 
-      // Inner Hub
       final hubPt = proj(_Vec3(wc.x, wc.y, rimZ));
       if (hubPt != null) {
         canvas.drawCircle(hubPt, 3.5, Paint()..color = const Color(0xFF090D14));
@@ -841,9 +679,8 @@ class _VehiclePainter extends CustomPainter {
     }
 
     // ------------------------------------------------------------------------
-    // 6. FUTURISTIC FRONT & REAR LED LIGHT BARS (HTML lines 1149-1159)
+    // 6. FRONT & REAR LED LIGHT BARS
     // ------------------------------------------------------------------------
-    // Front LED Light Bar at (2.26, 0.06, 0) width 1.58, color 0xE0F2FE
     final fLed1 = proj(const _Vec3(2.26, 0.06, -0.79));
     final fLed2 = proj(const _Vec3(2.26, 0.06, 0.79));
     if (fLed1 != null && fLed2 != null) {
@@ -864,7 +701,6 @@ class _VehiclePainter extends CustomPainter {
       );
     }
 
-    // Rear LED Light Bar at (-2.26, 0.18, 0) width 1.54, color 0xEF4444
     final rLed1 = proj(const _Vec3(-2.26, 0.18, -0.77));
     final rLed2 = proj(const _Vec3(-2.26, 0.18, 0.77));
     if (rLed1 != null && rLed2 != null) {
@@ -886,11 +722,9 @@ class _VehiclePainter extends CustomPainter {
     }
 
     // ------------------------------------------------------------------------
-    // 7. FRONT / REAR VOLUMETRIC DASHCAM VISION BEAM (HTML lines 1186-1196)
+    // 7. DASHCAM VISION CONE (MIRRORS ACTIVE LENS)
     // ------------------------------------------------------------------------
-    // Mirrors active lens: Front windshield camera or Rear window camera
-    final isFront =
-        !isFrontCamera; // In dashcam domain, isFrontCamera=false is the default rear-facing phone camera pointing out windshield
+    final isFront = !isFrontCamera;
     final coneSign = isFront ? 1.0 : -1.0;
     final coneApex = proj(_Vec3(1.85 * coneSign, 0.45, 0.0));
     final coneColor = isRecording
@@ -923,7 +757,6 @@ class _VehiclePainter extends CustomPainter {
         }
         conePath.close();
 
-        // Translucent vision beam volume
         canvas.drawPath(
           conePath,
           Paint()
@@ -931,7 +764,6 @@ class _VehiclePainter extends CustomPainter {
             ..style = PaintingStyle.fill,
         );
 
-        // Core boundary rays
         final rayPaint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.0
@@ -941,7 +773,6 @@ class _VehiclePainter extends CustomPainter {
           canvas.drawLine(coneApex, coneBasePts[i], rayPaint);
         }
 
-        // Base ring
         final baseRingPath = Path()
           ..moveTo(coneBasePts.first.dx, coneBasePts.first.dy);
         for (final pt in coneBasePts.skip(1)) {
@@ -950,7 +781,6 @@ class _VehiclePainter extends CustomPainter {
         baseRingPath.close();
         canvas.drawPath(baseRingPath, rayPaint);
 
-        // If Infinity Focus is ON, project road collimation laser grid
         if (infinityFocus) {
           final laserP1 = proj(_Vec3(baseX, floorY, -0.65));
           final laserP2 = proj(_Vec3(baseX, floorY, 0.65));
@@ -982,333 +812,4 @@ class _VehiclePainter extends CustomPainter {
       old.infinityFocus != infinityFocus ||
       old.loopRecordingMinutes != loopRecordingMinutes ||
       old.videoOverlayMode != videoOverlayMode;
-}
-
-// ============================================================================
-// SPATIAL HOTSPOT PIN & GLASS BADGE (EXACT HTML LINES 188-217 & SCREENSHOT)
-// ============================================================================
-
-class _SpatialHotspotButton extends StatelessWidget {
-  const _SpatialHotspotButton({
-    required this.title,
-    required this.badgeText,
-    required this.subtitle,
-    required this.accentColor,
-    required this.active,
-    required this.pulseValue,
-    required this.onTap,
-  });
-
-  final String title;
-  final String badgeText;
-  final String subtitle;
-  final Color accentColor;
-  final bool active;
-  final double pulseValue;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Glowing Pin Circle with Pulsing Ring (w-7 h-7, pulse-ring in HTML)
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              // Pulse wave ring (scale 0.85 -> 1.9, opacity -> 0)
-              Transform.scale(
-                scale: 0.85 + pulseValue * 1.05,
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: accentColor.withValues(
-                        alpha: (1.0 - pulseValue) * 0.75,
-                      ),
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-              // Main pin container
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: accentColor.withValues(alpha: 0.20),
-                  border: Border.all(
-                    color: accentColor.withValues(alpha: 0.85),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: accentColor.withValues(alpha: 0.45),
-                      blurRadius: 16,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: accentColor,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 8),
-
-          // Glass Card Badge (HTML lines 193-200 & 209-216)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xEB111621), // glass-card
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: active
-                    ? accentColor
-                    : accentColor.withValues(alpha: 0.35),
-                width: active ? 1.5 : 1.0,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.80),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: accentColor,
-                        fontSize: 9,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.1,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4.5,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: accentColor.withValues(alpha: 0.20),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        badgeText,
-                        style: TextStyle(
-                          color: accentColor,
-                          fontSize: 8.5,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// SPATIAL QUICK CARDS (EXACT POPUPS FROM HTML LINES 917-960)
-// ============================================================================
-
-class _FrontOpticsQuickCard extends StatelessWidget {
-  const _FrontOpticsQuickCard({
-    required this.isRecording,
-    required this.isFrontCamera,
-    required this.infinityFocus,
-    required this.videoOverlayMode,
-    required this.onSwitchLens,
-    required this.onToggleInfinityFocus,
-    required this.onChangeOverlayMode,
-    required this.onClose,
-  });
-
-  final bool isRecording;
-  final bool isFrontCamera;
-  final bool infinityFocus;
-  final String videoOverlayMode;
-  final VoidCallback onSwitchLens;
-  final ValueChanged<bool> onToggleInfinityFocus;
-  final VoidCallback onChangeOverlayMode;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      decoration: BoxDecoration(
-        color: const Color(0xF20B0F17),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x6638BDF8), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.85),
-            blurRadius: 18,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header (HTML line 918)
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFF38BDF8),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Text(
-                'PARABREZZA · DASHCAM OPTICS',
-                style: TextStyle(
-                  color: Color(0xFF38BDF8),
-                  fontSize: 9.5,
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: onClose,
-                child: const Icon(
-                  Icons.close_rounded,
-                  size: 16,
-                  color: Colors.white54,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // Actions Row (HTML line 927)
-          Row(
-            children: [
-              // Lens Switch
-              Expanded(
-                child: Material(
-                  color: const Color(0xFF131C28),
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    onTap: isRecording ? null : onSwitchLens,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        'Lens: ${isFrontCamera ? "Front" : "Rear"}',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: isRecording ? Colors.white30 : Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // Road Focus (Infinity) Toggle
-              Expanded(
-                child: Material(
-                  color: infinityFocus
-                      ? const Color(0x3338BDF8)
-                      : const Color(0xFF131C28),
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    onTap: () => onToggleInfinityFocus(!infinityFocus),
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: infinityFocus
-                              ? const Color(0xFF38BDF8)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        '∞ Focus: ${infinityFocus ? "ON" : "OFF"}',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: infinityFocus
-                              ? const Color(0xFF38BDF8)
-                              : Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // Overlay Mode Button
-              IconButton(
-                onPressed: onChangeOverlayMode,
-                icon: const Icon(
-                  Icons.layers_rounded,
-                  size: 18,
-                  color: Color(0xFF38BDF8),
-                ),
-                style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFF131C28),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
