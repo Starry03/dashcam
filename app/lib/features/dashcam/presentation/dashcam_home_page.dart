@@ -562,17 +562,13 @@ class _DashcamHomePageState extends State<DashcamHomePage>
             radius: 1.15,
             colors: isRec
                 ? const [
-                    Color(
-                      0x22EF4444,
-                    ), // red ambient glow when recording (HTML line 67)
+                    Color(0x22EF4444),
                     Color(0x0C38BDF8),
                     Color(0xFF06080C),
                   ]
                 : const [
-                    Color(
-                      0x1F38BDF8,
-                    ), // cyan ambient glow when idle (HTML line 62)
-                    Color(0x0A10B981),
+                    Color(0x1F38BDF8),
+                    Color(0x0638BDF8),
                     Color(0xFF06080C),
                   ],
             stops: const [0.0, 0.40, 0.85],

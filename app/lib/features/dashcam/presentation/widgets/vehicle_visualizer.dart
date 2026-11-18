@@ -275,20 +275,14 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
     }
   }
 
-  void _focusVehicleZone(String zone) {
+  void _toggleFrontOptics() {
     setState(() {
-      if (_activeZone == zone) {
+      if (_activeZone == 'front') {
         _activeZone = null;
       } else {
-        _activeZone = zone;
-        // Smoothly rotate 3D camera toward selected vehicle zone (HTML lines 897-903)
-        if (zone == 'front') {
-          _targetCamAngleY = -0.62;
-          _targetCamAngleX = 0.28;
-        } else if (zone == 'cabin') {
-          _targetCamAngleY = 0.72;
-          _targetCamAngleX = 0.42;
-        }
+        _activeZone = 'front';
+        _targetCamAngleY = -0.62;
+        _targetCamAngleX = 0.28;
       }
     });
   }
@@ -312,27 +306,20 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
         final pFront =
             camera.project(const _Vec3(0.85, 0.62, 0.35)) ??
             Offset(w * 0.68, h * 0.45);
-        final pCabin =
-            camera.project(const _Vec3(-0.65, 0.78, -0.25)) ??
-            Offset(w * 0.35, h * 0.38);
 
         final clampedFrontX = pFront.dx.clamp(20.0, w - 165.0);
         final clampedFrontY = pFront.dy.clamp(24.0, h - 85.0);
-
-        final clampedCabinX = pCabin.dx.clamp(20.0, w - 165.0);
-        final clampedCabinY = pCabin.dy.clamp(24.0, h - 85.0);
 
         return ClipRRect(
           borderRadius: BorderRadius.circular(24),
           child: Container(
             decoration: const BoxDecoration(
-              // Ambient Radial Glow from HTML lines 60-64
               gradient: RadialGradient(
                 center: Alignment(0, -0.15),
                 radius: 1.05,
                 colors: [
                   Color(0x1F38BDF8),
-                  Color(0x0A10B981),
+                  Color(0x0638BDF8),
                   Color(0xF006080C),
                 ],
                 stops: [0.0, 0.38, 0.85],
@@ -451,58 +438,29 @@ class VehicleVisualizerState extends State<VehicleVisualizer>
                       accentColor: const Color(0xFF38BDF8),
                       active: _activeZone == 'front',
                       pulseValue: _pulseController.value,
-                      onTap: () => _focusVehicleZone('front'),
+                      onTap: _toggleFrontOptics,
                     ),
                   ),
                 ),
 
                 // ------------------------------------------------------------
-                // SPATIAL HOTSPOT 2: CABIN HUB (HTML lines 204-217 & SCREENSHOT)
+                // SPATIAL QUICK CARD POPUP (Ottica & Focus)
                 // ------------------------------------------------------------
-                Positioned(
-                  left: clampedCabinX,
-                  top: clampedCabinY,
-                  child: FractionalTranslation(
-                    translation: const Offset(-0.85, -0.5),
-                    child: _SpatialHotspotButton(
-                      title: 'CABIN HUB',
-                      badgeText: widget.loopRecordingMinutes == 0
-                          ? 'Loop Off'
-                          : '${widget.loopRecordingMinutes}m',
-                      subtitle: 'Clip & Galleria',
-                      accentColor: const Color(0xFF10B981),
-                      active: _activeZone == 'cabin',
-                      pulseValue: _pulseController.value,
-                      onTap: () => _focusVehicleZone('cabin'),
-                    ),
-                  ),
-                ),
-
-                // ------------------------------------------------------------
-                // SPATIAL QUICK CARD POPUPS (HTML lines 917-960)
-                // ------------------------------------------------------------
-                if (_activeZone != null)
+                if (_activeZone == 'front')
                   Positioned(
                     left: 12,
                     right: 12,
                     bottom: 8,
-                    child: _activeZone == 'front'
-                        ? _FrontOpticsQuickCard(
-                            isRecording: widget.isRecording,
-                            isFrontCamera: widget.isFrontCamera,
-                            infinityFocus: widget.infinityFocus,
-                            videoOverlayMode: widget.videoOverlayMode,
-                            onSwitchLens: widget.onSwitchLens,
-                            onToggleInfinityFocus: widget.onToggleInfinityFocus,
-                            onChangeOverlayMode: widget.onChangeOverlayMode,
-                            onClose: () => setState(() => _activeZone = null),
-                          )
-                        : _CabinHubQuickCard(
-                            loopRecordingMinutes: widget.loopRecordingMinutes,
-                            onChangeLoopRecording: widget.onChangeLoopRecording,
-                            onOpenGallery: widget.onOpenGallery,
-                            onClose: () => setState(() => _activeZone = null),
-                          ),
+                    child: _FrontOpticsQuickCard(
+                      isRecording: widget.isRecording,
+                      isFrontCamera: widget.isFrontCamera,
+                      infinityFocus: widget.infinityFocus,
+                      videoOverlayMode: widget.videoOverlayMode,
+                      onSwitchLens: widget.onSwitchLens,
+                      onToggleInfinityFocus: widget.onToggleInfinityFocus,
+                      onChangeOverlayMode: widget.onChangeOverlayMode,
+                      onClose: () => setState(() => _activeZone = null),
+                    ),
                   ),
               ],
             ),
@@ -607,7 +565,7 @@ class _VehiclePainter extends CustomPainter {
       final activeArcPaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.4
-        ..color = const Color(0xFF10B981).withValues(alpha: 0.65);
+        ..color = const Color(0xFF38BDF8).withValues(alpha: 0.65);
 
       final segAngle = (math.pi * 2) / 3;
       final rotOffset =
@@ -1345,137 +1303,6 @@ class _FrontOpticsQuickCard extends StatelessWidget {
                 style: IconButton.styleFrom(
                   backgroundColor: const Color(0xFF131C28),
                   padding: const EdgeInsets.all(8),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CabinHubQuickCard extends StatelessWidget {
-  const _CabinHubQuickCard({
-    required this.loopRecordingMinutes,
-    required this.onChangeLoopRecording,
-    required this.onOpenGallery,
-    required this.onClose,
-  });
-
-  final int loopRecordingMinutes;
-  final VoidCallback onChangeLoopRecording;
-  final VoidCallback onOpenGallery;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      decoration: BoxDecoration(
-        color: const Color(0xF50B0F17),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0x6610B981), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.85),
-            blurRadius: 18,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header (HTML line 940)
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFF10B981),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Text(
-                'ABITACOLO · CLIP & LOOP',
-                style: TextStyle(
-                  color: Color(0xFF10B981),
-                  fontSize: 9.5,
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: onClose,
-                child: const Icon(
-                  Icons.close_rounded,
-                  size: 16,
-                  color: Colors.white54,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // Actions Row (HTML line 949)
-          Row(
-            children: [
-              // Loop Selector
-              Expanded(
-                child: Material(
-                  color: const Color(0xFF131C28),
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    onTap: onChangeLoopRecording,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        'Loop: ${loopRecordingMinutes == 0 ? "Off" : "${loopRecordingMinutes}m"}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // Open Gallery (HTML line 955)
-              Expanded(
-                child: Material(
-                  color: const Color(0x2810B981),
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    onTap: onOpenGallery,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0x6610B981)),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: const Text(
-                        'Open Gallery →',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFF10B981),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
                 ),
               ),
             ],
