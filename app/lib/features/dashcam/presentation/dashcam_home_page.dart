@@ -533,6 +533,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     await DashcamPlatformBridge.setInfinityFocus(enabled);
   }
 
+  final GlobalKey<VehicleVisualizerState> _visualizerKey =
+      GlobalKey<VehicleVisualizerState>();
+
   Future<void> _openPhoneSettingsSheet() {
     return showPhoneSettingsSheet(
       context,
@@ -547,14 +550,32 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
   @override
   Widget build(BuildContext context) {
+    final isRec = _status.isRecording;
+    final isPaused = _status.isPaused;
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
+      body: AnimatedContainer(
+        duration: const Duration(milliseconds: 600),
+        decoration: BoxDecoration(
           gradient: RadialGradient(
-            center: Alignment(0, -0.15),
+            center: const Alignment(0, -0.25),
             radius: 1.15,
-            colors: [Color(0xFF172027), Color(0xFF0B0E12), Color(0xFF07090C)],
-            stops: [0.0, 0.58, 1.0],
+            colors: isRec
+                ? const [
+                    Color(
+                      0x22EF4444,
+                    ), // red ambient glow when recording (HTML line 67)
+                    Color(0x0C38BDF8),
+                    Color(0xFF06080C),
+                  ]
+                : const [
+                    Color(
+                      0x1F38BDF8,
+                    ), // cyan ambient glow when idle (HTML line 62)
+                    Color(0x0A10B981),
+                    Color(0xFF06080C),
+                  ],
+            stops: const [0.0, 0.40, 0.85],
           ),
         ),
         child: SafeArea(
@@ -569,11 +590,75 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // Top HUD Row (HTML lines 133-154)
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Spacer(),
+                          // Reset 3D Camera View Button
+                          _TopIconButton(
+                            icon: Icons.view_in_ar_rounded,
+                            tooltip: 'Centra vista 3D',
+                            onTap: () =>
+                                _visualizerKey.currentState?.resetCamera(),
+                          ),
+                          // Center Status Pill
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xCC111621),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: isRec
+                                    ? const Color(0x80EF4444)
+                                    : (isPaused
+                                          ? const Color(0x80F59E0B)
+                                          : Colors.white.withValues(
+                                              alpha: 0.10,
+                                            )),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: isRec
+                                        ? const Color(0xFFEF4444)
+                                        : (isPaused
+                                              ? const Color(0xFFF59E0B)
+                                              : const Color(0xFF94A3B8)),
+                                  ),
+                                ),
+                                const SizedBox(width: 7),
+                                Text(
+                                  isRec
+                                      ? 'REC'
+                                      : (isPaused ? 'PAUSED' : 'READY'),
+                                  style: TextStyle(
+                                    color: isRec
+                                        ? const Color(0xFFEF4444)
+                                        : (isPaused
+                                              ? const Color(0xFFF59E0B)
+                                              : const Color(0xFFCBD5E1)),
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 2.0,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Phone Settings Button
                           _TopIconButton(
                             icon: Icons.settings_suggest_rounded,
+                            tooltip: 'Impostazioni Telefono',
                             onTap: () => unawaited(_openPhoneSettingsSheet()),
                           ),
                         ],
@@ -589,8 +674,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                       ),
                       const SizedBox(height: 6),
                       SizedBox(
-                        height: 278,
+                        height: 310,
                         child: VehicleVisualizer(
+                          key: _visualizerKey,
                           isRecording: _status.isRecording,
                           isPaused: _status.isPaused,
                           speedKmh: _status.speedKmh,
@@ -653,14 +739,15 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 }
 
 class _TopIconButton extends StatelessWidget {
-  const _TopIconButton({required this.icon, required this.onTap});
+  const _TopIconButton({required this.icon, required this.onTap, this.tooltip});
 
   final IconData icon;
   final VoidCallback onTap;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final button = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -674,5 +761,10 @@ class _TopIconButton extends StatelessWidget {
         child: Icon(icon, size: 18, color: const Color(0xFFB7C4CA)),
       ),
     );
+
+    if (tooltip != null) {
+      return Tooltip(message: tooltip!, child: button);
+    }
+    return button;
   }
 }
