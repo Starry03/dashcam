@@ -108,6 +108,9 @@ burn-in processing is skipped and the original clip remains available.
 - Preserve the Android lifecycle behavior of the foreground service.
 - Avoid unrelated refactors in the single-screen Flutter implementation; add or reuse widgets
   under `features/dashcam/presentation/widgets/`.
+- Keep the automotive UI restrained: graphite surfaces, cool silver/cyan telemetry accents,
+  gold reserved for incident protection, and red reserved for active recording. Reuse
+  `VehicleVisualizer` instead of introducing heavy 3D rendering dependencies.
 - Keep settings persistence and native state in sync.
 - Update both `AGENTS.md` and `CLAUDE.md` when architecture or repository conventions change.
 - Release APK updates require Android apps to keep a stable signing key. Configure

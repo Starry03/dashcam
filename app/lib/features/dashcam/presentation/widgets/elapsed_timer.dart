@@ -16,10 +16,13 @@ class ElapsedTimer extends StatelessWidget {
     return Text(
       format(elapsedSeconds),
       style: const TextStyle(
-        fontSize: 64,
-        fontWeight: FontWeight.w200,
+        fontSize: 44,
+        fontWeight: FontWeight.w300,
         fontFamily: 'monospace',
+        letterSpacing: -1.5,
+        color: Color(0xFFF2F5F6),
       ),
+      textAlign: TextAlign.center,
     );
   }
 }

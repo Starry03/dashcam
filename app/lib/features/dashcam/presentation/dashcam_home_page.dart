@@ -16,10 +16,9 @@ import '../domain/gps_status.dart';
 import 'widgets/control_panel.dart';
 import 'widgets/elapsed_timer.dart';
 import 'widgets/quick_actions_sheet.dart';
-import 'widgets/recording_status_header.dart';
 import 'widgets/speed_indicator.dart';
-import 'widgets/stat_card.dart';
 import 'widgets/warning_banner.dart';
+import 'widgets/vehicle_visualizer.dart';
 
 class DashcamHomePage extends StatefulWidget {
   const DashcamHomePage({super.key});
@@ -534,116 +533,145 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     await DashcamPlatformBridge.setInfinityFocus(enabled);
   }
 
-  void _openQuickActionsSheet() {
-    if (!mounted) return;
-    unawaited(
-      showQuickActionsSheet(
-        context,
-        isFrontCamera: _isFrontCamera,
-        isRecording: _status.isRecording,
-        loopRecordingMinutes: _loopRecordingMinutes,
-        infinityFocus: _infinityFocus,
-        videoOverlayMode: _videoOverlayMode,
-        onSwitchLens: () => unawaited(_toggleCamera()),
-        onLock: () => unawaited(_lockIncident()),
-        onOpenGallery: () => unawaited(_openGallery()),
-        onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
-        onToggleInfinityFocus: (val) => unawaited(_toggleInfinityFocus(val)),
-        onChangeOverlayMode: () => unawaited(_changeOverlayMode()),
-        onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
-      ),
+  Future<void> _openPhoneSettingsSheet() {
+    return showPhoneSettingsSheet(
+      context,
+      freeStorageMb: _status.freeStorageMb,
+      appVersion: _appVersion,
+      loopRecordingMinutes: _loopRecordingMinutes,
+      onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
+      onOpenGallery: () => unawaited(_openGallery()),
+      onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                RecordingStatusHeader(
-                  isRecording: _status.isRecording,
-                  isPaused: _status.isPaused,
-                ),
-                const SizedBox(height: 24),
-                ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
-                const SizedBox(height: 12),
-                SpeedIndicator(
-                  speedKmh: _status.speedKmh,
-                  gpsStatus: _status.hasGpsFix
-                      ? GpsUiStatus.active
-                      : GpsUiStatus.weakSignal,
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: StatCard(
-                        label: 'Free Storage',
-                        value: _status.freeStorageMb >= 1024
-                            ? '${(_status.freeStorageMb / 1024).toStringAsFixed(1)} GB'
-                            : '${_status.freeStorageMb} MB',
-                        icon: Icons.storage_rounded,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: StatCard(
-                        label: 'Last Clip',
-                        value: _status.lastSegment == '-'
-                            ? 'None'
-                            : _status.lastSegment,
-                        icon: Icons.video_file_rounded,
-                        onTap: () => unawaited(_openGallery()),
-                        trailing: _status.lastSegmentLocked
-                            ? const Icon(
-                                Icons.shield,
-                                color: Colors.orange,
-                                size: 16,
-                              )
-                            : null,
-                      ),
-                    ),
-                  ],
-                ),
-                if (_status.warning.isNotEmpty && !_dismissedWarning) ...[
-                  const SizedBox(height: 12),
-                  WarningBanner(
-                    message: _status.warning,
-                    onDismiss: () => setState(() => _dismissedWarning = true),
-                  ),
-                ],
-                if (_error.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  WarningBanner(
-                    message: _error,
-                    onDismiss: () => setState(() => _error = ''),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                ControlPanel(
-                  isRecording: _status.isRecording,
-                  isPaused: _status.isPaused,
-                  busy: _busy,
-                  onToggleRecording: () => unawaited(_toggleRecording()),
-                  onTogglePause: () => unawaited(_togglePause()),
-                  onLock: () => unawaited(_lockIncident()),
-                  onQuickActions: _openQuickActionsSheet,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _appVersion,
-                  style: const TextStyle(color: Colors.white24, fontSize: 11),
-                ),
-              ],
-            ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.15),
+            radius: 1.15,
+            colors: [Color(0xFF172027), Color(0xFF0B0E12), Color(0xFF07090C)],
+            stops: [0.0, 0.58, 1.0],
           ),
         ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 20,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Spacer(),
+                          _TopIconButton(
+                            icon: Icons.settings_suggest_rounded,
+                            onTap: () => unawaited(_openPhoneSettingsSheet()),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
+                      const SizedBox(height: 8),
+                      SpeedIndicator(
+                        speedKmh: _status.speedKmh,
+                        gpsStatus: _status.hasGpsFix
+                            ? GpsUiStatus.active
+                            : GpsUiStatus.weakSignal,
+                      ),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        height: 278,
+                        child: VehicleVisualizer(
+                          isRecording: _status.isRecording,
+                          isPaused: _status.isPaused,
+                          speedKmh: _status.speedKmh,
+                          isFrontCamera: _isFrontCamera,
+                          infinityFocus: _infinityFocus,
+                          videoOverlayMode: _videoOverlayMode,
+                          loopRecordingMinutes: _loopRecordingMinutes,
+                          onSwitchLens: () => unawaited(_toggleCamera()),
+                          onToggleInfinityFocus: (value) =>
+                              unawaited(_toggleInfinityFocus(value)),
+                          onChangeOverlayMode: () =>
+                              unawaited(_changeOverlayMode()),
+                          onChangeLoopRecording: () =>
+                              unawaited(_changeLoopRecording()),
+                          onOpenGallery: () => unawaited(_openGallery()),
+                        ),
+                      ),
+                      if (_status.warning.isNotEmpty && !_dismissedWarning ||
+                          _error.isNotEmpty) ...[
+                        WarningBanner(
+                          message: _error.isNotEmpty ? _error : _status.warning,
+                          onDismiss: () => setState(() {
+                            if (_error.isNotEmpty) {
+                              _error = '';
+                            } else {
+                              _dismissedWarning = true;
+                            }
+                          }),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      ControlPanel(
+                        isRecording: _status.isRecording,
+                        isPaused: _status.isPaused,
+                        busy: _busy,
+                        onToggleRecording: () => unawaited(_toggleRecording()),
+                        onTogglePause: () => unawaited(_togglePause()),
+                        onLock: () => unawaited(_lockIncident()),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _appVersion,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white24,
+                          fontSize: 9,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopIconButton extends StatelessWidget {
+  const _TopIconButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: const Color(0xCC151A20),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withAlpha(20)),
+        ),
+        child: Icon(icon, size: 18, color: const Color(0xFFB7C4CA)),
       ),
     );
   }

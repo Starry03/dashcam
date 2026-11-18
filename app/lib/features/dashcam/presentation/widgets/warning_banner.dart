@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
 
 class WarningBanner extends StatelessWidget {
-  const WarningBanner({
-    super.key,
-    required this.message,
-    this.onDismiss,
-  });
+  const WarningBanner({super.key, required this.message, this.onDismiss});
 
   final String message;
   final VoidCallback? onDismiss;
@@ -15,13 +11,17 @@ class WarningBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.orange.withAlpha(32),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.withAlpha(70)),
+        color: const Color(0x2CC9A45A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x66C9A45A)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.orange,
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -35,7 +35,11 @@ class WarningBanner extends StatelessWidget {
               onTap: onDismiss,
               child: const Padding(
                 padding: EdgeInsets.all(4),
-                child: Icon(Icons.close_rounded, color: Colors.orange, size: 18),
+                child: Icon(
+                  Icons.close_rounded,
+                  color: Colors.orange,
+                  size: 18,
+                ),
               ),
             ),
           ],

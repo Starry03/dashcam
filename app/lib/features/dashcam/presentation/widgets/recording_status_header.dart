@@ -12,30 +12,52 @@ class RecordingStatusHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = isRecording
-        ? (isPaused ? 'PAUSED' : 'RECORDING')
-        : 'READY';
+    final label = isRecording ? (isPaused ? 'PAUSED' : 'RECORDING') : 'READY';
     final color = isRecording
         ? (isPaused ? Colors.orangeAccent : Colors.redAccent)
         : Colors.grey;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.fiber_manual_record,
-          color: isRecording ? Colors.redAccent : Colors.grey,
-          size: 16,
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xCC151A20),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isRecording ? color.withAlpha(90) : Colors.white.withAlpha(18),
         ),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.5,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: isRecording
+                  ? [
+                      BoxShadow(
+                        color: color.withAlpha(120),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: TextStyle(
+              color: isRecording ? Colors.white : const Color(0xFF9CABB3),
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
