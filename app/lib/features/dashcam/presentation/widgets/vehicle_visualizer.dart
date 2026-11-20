@@ -122,7 +122,12 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
                 child: _SpatialHotspotButton(
                   title: 'FRONT CAM',
                   badgeText: widget.isFrontCamera ? 'Front' : 'Rear',
-                  subtitle: 'Ottica & Focus',
+                  subtitle:
+                      'Ottica & Focus · ${widget.videoOverlayMode == 'subtitles'
+                          ? 'Sub'
+                          : widget.videoOverlayMode == 'burnin'
+                          ? 'Burn'
+                          : 'No OVL'}',
                   accentColor: const Color(0xFF38BDF8),
                   active: _activeZone == 'front',
                   onTap: () => _focusVehicleZone('front'),
@@ -156,6 +161,7 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
                         isRecording: widget.isRecording,
                         isFrontCamera: widget.isFrontCamera,
                         infinityFocus: widget.infinityFocus,
+                        videoOverlayMode: widget.videoOverlayMode,
                         onSwitchLens: widget.onSwitchLens,
                         onToggleInfinityFocus: widget.onToggleInfinityFocus,
                         onChangeOverlayMode: widget.onChangeOverlayMode,
@@ -320,6 +326,7 @@ class _FrontOpticsQuickCard extends StatelessWidget {
     required this.isRecording,
     required this.isFrontCamera,
     required this.infinityFocus,
+    required this.videoOverlayMode,
     required this.onSwitchLens,
     required this.onToggleInfinityFocus,
     required this.onChangeOverlayMode,
@@ -329,10 +336,22 @@ class _FrontOpticsQuickCard extends StatelessWidget {
   final bool isRecording;
   final bool isFrontCamera;
   final bool infinityFocus;
+  final String videoOverlayMode;
   final VoidCallback onSwitchLens;
   final ValueChanged<bool> onToggleInfinityFocus;
   final VoidCallback onChangeOverlayMode;
   final VoidCallback onClose;
+
+  String get _overlayLabel {
+    switch (videoOverlayMode) {
+      case 'subtitles':
+        return 'Overlay: Sub';
+      case 'burnin':
+        return 'Overlay: Burn';
+      default:
+        return 'Overlay: Off';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -451,17 +470,39 @@ class _FrontOpticsQuickCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // Overlay Mode
-              IconButton(
-                onPressed: onChangeOverlayMode,
-                icon: const Icon(
-                  Icons.layers_rounded,
-                  size: 18,
-                  color: Color(0xFF38BDF8),
-                ),
-                style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFF131C28),
-                  padding: const EdgeInsets.all(8),
+              // Overlay Mode — shows current value, cycles on tap
+              Expanded(
+                child: Material(
+                  color: videoOverlayMode != 'none'
+                      ? const Color(0x2238BDF8)
+                      : const Color(0xFF131C28),
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    onTap: onChangeOverlayMode,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: videoOverlayMode != 'none'
+                              ? const Color(0xFF38BDF8)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        _overlayLabel,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: videoOverlayMode != 'none'
+                              ? const Color(0xFF38BDF8)
+                              : Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
