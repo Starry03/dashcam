@@ -32,12 +32,12 @@ class VehicleVisualizer extends StatefulWidget {
   final VoidCallback onOpenGallery;
 
   @override
-  State<VehicleVisualizer> createState() => _VehicleVisualizerState();
+  State<VehicleVisualizer> createState() => VehicleVisualizerState();
 }
 
 // VEHICLE VISUALIZER STATE - GLB rendering handled by Flutter3DController
 // -----------------------------------------------------------------------------
-class _VehicleVisualizerState extends State<VehicleVisualizer> {
+class VehicleVisualizerState extends State<VehicleVisualizer> {
   final Flutter3DController _modelController = Flutter3DController();
   String? _activeZone;
 
