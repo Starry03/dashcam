@@ -43,9 +43,12 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   bool _infinityFocus = true;
   String _videoOverlayMode = 'subtitles';
   bool _dismissedWarning = false;
+  double? _simulatedSpeedKmh;
 
   final GlobalKey<VehicleVisualizerState> _visualizerKey =
       GlobalKey<VehicleVisualizerState>();
+
+  double get _displayedSpeedKmh => _simulatedSpeedKmh ?? _status.speedKmh;
 
   @override
   void initState() {
@@ -511,7 +514,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
 
               // Speed & GPS Indicator
               SpeedIndicator(
-                speedKmh: _status.speedKmh,
+                speedKmh: _displayedSpeedKmh,
                 gpsStatus: _status.hasGpsFix
                     ? GpsUiStatus.active
                     : GpsUiStatus.weakSignal,
@@ -524,7 +527,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   key: _visualizerKey,
                   isRecording: _status.isRecording,
                   isPaused: _status.isPaused,
-                  speedKmh: _status.speedKmh,
+                  speedKmh: _displayedSpeedKmh,
                   isFrontCamera: _isFrontCamera,
                   infinityFocus: _infinityFocus,
                   videoOverlayMode: _videoOverlayMode,
@@ -534,6 +537,9 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                   onChangeOverlayMode: _changeOverlayMode,
                   onChangeLoopRecording: _changeLoopRecording,
                   onOpenGallery: _openGallery,
+                  onSpeedSimulationChanged: (speed) => setState(() {
+                    _simulatedSpeedKmh = speed;
+                  }),
                 ),
               ),
               const SizedBox(height: 8),

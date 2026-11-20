@@ -23,6 +23,62 @@
       touch-action: none;
     }
 
+    #viewer-controls {
+      position: absolute;
+      z-index: 3;
+      left: 14px;
+      bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .viewer-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 32px;
+      padding: 0 11px;
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 9px;
+      color: #b7dff0;
+      background: rgba(17, 22, 33, 0.88);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+      cursor: pointer;
+      font: 700 9px 'Courier New', monospace;
+      letter-spacing: 0.8px;
+      transition: border-color .18s, background-color .18s, color .18s,
+        transform .12s, box-shadow .18s;
+    }
+    .viewer-control:hover { border-color: rgba(56, 189, 248, 0.72); }
+    .viewer-control:active { transform: scale(0.95); }
+    .viewer-control.active {
+      color: #071016;
+      background: #38BDF8;
+      border-color: #7ddcff;
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.62);
+      animation: simulationGlow 1.1s ease-in-out infinite;
+    }
+    .viewer-control .control-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 8px currentColor;
+    }
+    .viewer-control.active .control-dot {
+      animation: simulationDot 0.7s ease-in-out infinite alternate;
+    }
+    @keyframes simulationGlow {
+      0%, 100% { box-shadow: 0 0 12px rgba(56, 189, 248, 0.45); }
+      50% { box-shadow: 0 0 26px rgba(56, 189, 248, 0.95); }
+    }
+    @keyframes simulationDot {
+      from { transform: scale(1); }
+      to { transform: scale(1.8); }
+    }
+
     #floor-grid {
       position: absolute;
       z-index: 0;
@@ -78,6 +134,21 @@
     }
     .hotspot.active .card,
     .hotspot:active .card { border-color: rgba(56, 189, 248, 0.90); }
+    .hotspot.active .beacon {
+      animation: selectedPulse .72s ease-in-out infinite alternate;
+      transform: scale(1.16);
+    }
+    .hotspot.active .card {
+      animation: selectedCard 1.25s ease-in-out infinite;
+    }
+    @keyframes selectedPulse {
+      from { box-shadow: 0 0 10px rgba(56,189,248,0.55); }
+      to { box-shadow: 0 0 30px rgba(56,189,248,1); }
+    }
+    @keyframes selectedCard {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(3px); }
+    }
 
     .title-row {
       display: flex; align-items: center; gap: 5px;
@@ -155,6 +226,13 @@
       </div>
     </button>
   </model-viewer>
+  <div id="viewer-controls" aria-label="Controlli simulazione">
+    <button id="speed-simulation" class="viewer-control" type="button"
+      onclick="toggleSpeedSimulation()" aria-pressed="false">
+      <span class="control-dot"></span>
+      SIM SPEED
+    </button>
+  </div>
 
   <script>
     const mv = document.getElementById('mv');
@@ -165,6 +243,77 @@
     const GRID_STEP = 0.65;    // Dimensione di ogni cella della griglia
     const FLOOR_Y = 0.0;       // Livello esatto dove poggiano le ruote
     let gridFrame = 0;
+    let actualSpeedKmh = 0;
+    let simulatedSpeedKmh = null;
+    let wheelNodes = [];
+    let wheelRotation = 0;
+    let lastWheelFrame = 0;
+    let wheelAnimationStarted = false;
+    let floorPulse = 0;
+
+    function effectiveSpeedKmh() {
+      return simulatedSpeedKmh ?? actualSpeedKmh;
+    }
+
+    function setVehicleSpeed(speed) {
+      actualSpeedKmh = Number.isFinite(Number(speed))
+        ? Math.max(0, Number(speed))
+        : 0;
+    }
+
+    function toggleSpeedSimulation() {
+      simulatedSpeedKmh = simulatedSpeedKmh === null ? 40 : null;
+      const button = document.getElementById('speed-simulation');
+      button.classList.toggle('active', simulatedSpeedKmh !== null);
+      button.setAttribute('aria-pressed', simulatedSpeedKmh !== null ? 'true' : 'false');
+      button.lastChild.textContent = simulatedSpeedKmh !== null
+        ? ' SIM ON'
+        : ' SIM SPEED';
+      window.flutter_inappwebview.callHandler(
+        'speedSimulationChanged',
+        simulatedSpeedKmh,
+      );
+    }
+
+    function findWheelNodes() {
+      const scene = mv.model?.scene;
+      if (!scene || typeof scene.traverse !== 'function') return;
+      wheelNodes = [];
+      scene.traverse((node) => {
+        const name = (node.name || '').toLowerCase();
+        if (/(wheel|tire|tyre|rim|pneu)/.test(name) && node.rotation) {
+          node.matrixAutoUpdate = true;
+          wheelNodes.push(node);
+        }
+      });
+    }
+
+    function animateWheels(timestamp) {
+      const speed = effectiveSpeedKmh();
+      if (!wheelNodes.length) findWheelNodes();
+      if (lastWheelFrame === 0) lastWheelFrame = timestamp;
+      const elapsed = Math.min(timestamp - lastWheelFrame, 100);
+      lastWheelFrame = timestamp;
+      if (speed > 0 && wheelNodes.length) {
+        // A visualized wheel circumference of roughly two metres gives a
+        // readable rotation without making the model spin unrealistically.
+        wheelRotation -= (speed / 3.6 / 2) * (elapsed / 1000) * Math.PI * 2;
+        wheelNodes.forEach((node) => {
+          node.rotation.z = wheelRotation;
+          node.updateMatrix();
+        });
+        mv.model.scene.updateMatrixWorld(true);
+        // model-viewer renders on demand; this harmless camera assignment
+        // invalidates the frame after changing the Three.js wheel nodes.
+        if (typeof mv.getCameraOrbit === 'function') {
+          const orbit = mv.getCameraOrbit();
+          const nudge = Math.sin(timestamp / 1000) * 0.00001;
+          mv.cameraOrbit =
+            `${orbit.theta + nudge}rad ${orbit.phi}rad ${orbit.radius}m`;
+        }
+      }
+      requestAnimationFrame(animateWheels);
+    }
 
     function resizeGrid() {
       const ratio = window.devicePixelRatio || 1;
@@ -269,6 +418,9 @@
         }
 
         // 2. Anello radar / pedana circolare attorno all'auto (richiama la UI originale)
+          const ringPulse = effectiveSpeedKmh() > 0
+            ? 0.22 + Math.abs(Math.sin(floorPulse)) * 0.28
+            : 0;
         for (const ringRadius of [2.55, 3.25]) {
           ctx.beginPath();
           let started = false;
@@ -290,17 +442,29 @@
           }
           ctx.lineWidth = ringRadius === 2.55 ? 1.5 : 1.0;
           ctx.strokeStyle = ringRadius === 2.55
-            ? 'rgba(56, 189, 248, 0.48)'
-            : 'rgba(56, 189, 248, 0.18)';
+            ? `rgba(56, 189, 248, ${0.48 + ringPulse})`
+            : `rgba(56, 189, 248, ${0.18 + ringPulse * 0.45})`;
           ctx.stroke();
         }
       });
     }
 
+    function animateFloor(timestamp) {
+      floorPulse = timestamp / 420;
+      if (effectiveSpeedKmh() > 0) drawGrid();
+      requestAnimationFrame(animateFloor);
+    }
+
     mv.addEventListener('dblclick', resetCamera);
     mv.addEventListener('camera-change', drawGrid);
     mv.addEventListener('load', () => {
+      findWheelNodes();
       drawGrid();
+      if (!wheelAnimationStarted) {
+        wheelAnimationStarted = true;
+        requestAnimationFrame(animateWheels);
+        requestAnimationFrame(animateFloor);
+      }
       window.flutter_inappwebview.callHandler('viewerReady');
     });
     window.addEventListener('resize', resizeGrid);

@@ -20,6 +20,7 @@ class VehicleVisualizer extends StatefulWidget {
     required this.onChangeOverlayMode,
     required this.onChangeLoopRecording,
     required this.onOpenGallery,
+    required this.onSpeedSimulationChanged,
   });
 
   final bool isRecording;
@@ -34,6 +35,7 @@ class VehicleVisualizer extends StatefulWidget {
   final VoidCallback onChangeOverlayMode;
   final VoidCallback onChangeLoopRecording;
   final VoidCallback onOpenGallery;
+  final ValueChanged<double?> onSpeedSimulationChanged;
 
   @override
   State<VehicleVisualizer> createState() => VehicleVisualizerState();
@@ -89,7 +91,16 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
       callback: (_) {
         _viewerReady = true;
         _runViewerCommand('setActiveZone(${_jsString(_activeZone)})');
+        _syncViewerSpeed();
         _syncViewerBadges();
+        return null;
+      },
+    );
+    controller.addJavaScriptHandler(
+      handlerName: 'speedSimulationChanged',
+      callback: (args) {
+        final value = args.isNotEmpty ? args.first : null;
+        widget.onSpeedSimulationChanged(value is num ? value.toDouble() : null);
         return null;
       },
     );
@@ -126,9 +137,16 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
     _runViewerCommand("updateBadge('badge-loop', ${_jsString(loop)})");
   }
 
+  void _syncViewerSpeed() {
+    _runViewerCommand('setVehicleSpeed(${widget.speedKmh})');
+  }
+
   @override
   void didUpdateWidget(covariant VehicleVisualizer oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.speedKmh != widget.speedKmh) {
+      _syncViewerSpeed();
+    }
     if (oldWidget.isFrontCamera != widget.isFrontCamera ||
         oldWidget.loopRecordingMinutes != widget.loopRecordingMinutes) {
       _syncViewerBadges();
