@@ -299,7 +299,7 @@ class DashcamForegroundService : LifecycleService() {
                 cameraProvider?.unbindAll()
                 currentCamera = cameraProvider?.bindToLifecycle(
                     this,
-                    if (DashcamStatusStore.isFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
+                    if (DashcamStatusStore.isFrontCamera) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA,
                     videoCapture
                 )
                 applyFocusMode()
@@ -314,7 +314,6 @@ class DashcamForegroundService : LifecycleService() {
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun applyFocusMode() {
         val cam = currentCamera ?: return
-        if (DashcamStatusStore.isFrontCamera) return
 
         try {
             val camera2Control = Camera2CameraControl.from(cam.cameraControl)
