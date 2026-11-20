@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <script type="module">__MODEL_VIEWER_SCRIPT__</script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+
+    body {
+      position: relative;
+    }
+
+    model-viewer {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      --progress-bar-color: transparent;
+      --progress-mask: transparent;
+      touch-action: none;
+    }
+
+    #scene-loader {
+      position: absolute;
+      z-index: 5;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      background: radial-gradient(
+        circle at 50% 46%,
+        rgba(21, 32, 43, 0.72),
+        rgba(7, 12, 18, 0.9) 72%
+      );
+      opacity: 1;
+      transition: opacity .35s ease, visibility .35s ease;
+    }
+    #scene-loader.hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+    .loader-hud {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: #b7dff0;
+      font: 700 9px 'Courier New', monospace;
+      letter-spacing: 1.6px;
+    }
+    .loader-orbit {
+      position: relative;
+      width: 52px;
+      height: 52px;
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 50%;
+      box-shadow: 0 0 22px rgba(56, 189, 248, 0.14);
+      animation: loaderSpin 1.8s linear infinite;
+    }
+    .loader-orbit::before,
+    .loader-orbit::after {
+      content: '';
+      position: absolute;
+      inset: 7px;
+      border: 1px solid rgba(56, 189, 248, 0.55);
+      border-left-color: transparent;
+      border-radius: 50%;
+    }
+    .loader-orbit::after {
+      inset: 17px;
+      border-color: #38BDF8;
+      border-right-color: transparent;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.75);
+      animation: loaderSpinReverse 1s linear infinite;
+    }
+    .loader-core {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #38BDF8;
+      box-shadow: 0 0 12px #38BDF8;
+      transform: translate(-50%, -50%);
+    }
+    .loader-caption {
+      opacity: .8;
+    }
+    @keyframes loaderSpin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes loaderSpinReverse {
+      to { transform: rotate(-360deg); }
+    }
+
+    #viewer-controls {
+      position: absolute;
+      z-index: 3;
+      left: 14px;
+      bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .viewer-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 32px;
+      padding: 0 11px;
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 9px;
+      color: #b7dff0;
+      background: rgba(17, 22, 33, 0.88);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+      cursor: pointer;
+      font: 700 9px 'Courier New', monospace;
+      letter-spacing: 0.8px;
+      transition: border-color .18s, background-color .18s, color .18s,
+        transform .12s, box-shadow .18s;
+    }
+    .viewer-control:hover { border-color: rgba(56, 189, 248, 0.72); }
+    .viewer-control:active { transform: scale(0.95); }
+    .viewer-control.active {
+      color: #071016;
+      background: #38BDF8;
+      border-color: #7ddcff;
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.62);
+      animation: simulationGlow 1.1s ease-in-out infinite;
+    }
+    .viewer-control .control-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 8px currentColor;
+    }
+    .viewer-control.active .control-dot {
+      animation: simulationDot 0.7s ease-in-out infinite alternate;
+    }
+    @keyframes simulationGlow {
+      0%, 100% { box-shadow: 0 0 12px rgba(56, 189, 248, 0.45); }
+      50% { box-shadow: 0 0 26px rgba(56, 189, 248, 0.95); }
+    }
+    @keyframes simulationDot {
+      from { transform: scale(1); }
+      to { transform: scale(1.8); }
+    }
+
+    #floor-grid {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      /* Dissolvenza radiale elegante verso lo sfondo scuro */
+      -webkit-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 68%);
+      mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 68%);
+    }
+
+    /* ── Spatial Hotspot Pin (beacon + label card) ── */
+    .hotspot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      outline: none;
+      white-space: nowrap;
+    }
+
+    .beacon {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.20);
+      border: 1.3px solid rgba(56, 189, 248, 0.75);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.50);
+      flex-shrink: 0;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 8px rgba(56,189,248,0.40); }
+      50%       { box-shadow: 0 0 20px rgba(56,189,248,0.75); }
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #38BDF8;
+    }
+
+    .card {
+      background: rgba(17, 22, 33, 0.92);
+      border: 1px solid rgba(56, 189, 248, 0.38);
+      border-radius: 12px;
+      padding: 6px 10px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.80);
+      transition: border-color .18s;
+    }
+    .hotspot.active .card,
+    .hotspot:active .card { border-color: rgba(56, 189, 248, 0.90); }
+    .hotspot.active .beacon {
+      animation: selectedPulse .72s ease-in-out infinite alternate;
+      transform: scale(1.16);
+    }
+    .hotspot.active .card {
+      animation: selectedCard 1.25s ease-in-out infinite;
+    }
+    @keyframes selectedPulse {
+      from { box-shadow: 0 0 10px rgba(56,189,248,0.55); }
+      to { box-shadow: 0 0 30px rgba(56,189,248,1); }
+    }
+    @keyframes selectedCard {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(3px); }
+    }
+
+    .title-row {
+      display: flex; align-items: center; gap: 5px;
+    }
+    .title {
+      color: #38BDF8;
+      font-size: 8.5px;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      letter-spacing: 1.1px;
+    }
+    .badge {
+      background: rgba(56,189,248,0.20);
+      color: #38BDF8;
+      font-size: 8px;
+      font-family: 'Courier New', monospace;
+      padding: 1.5px 4.5px;
+      border-radius: 4px;
+    }
+    .sub {
+      display: block;
+      color: #fff;
+      font-size: 10.5px;
+      font-weight: 500;
+      margin-top: 2px;
+      font-family: system-ui, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="floor-grid" aria-hidden="true"></canvas>
+  <div id="scene-loader" role="status" aria-label="Loading 3D scene">
+    <div class="loader-hud">
+      <div class="loader-orbit">
+        <div class="loader-core"></div>
+      </div>
+      <span class="loader-caption">INITIALIZING VEHICLE HUD</span>
+    </div>
+  </div>
+  <model-viewer
+    id="mv"
+    src="data:model/gltf-binary;base64,__MODEL_DATA__"
+    camera-controls
+    disable-pan
+    min-camera-orbit="-180deg 72deg 80%"
+    max-camera-orbit="180deg 72deg 105%"
+    camera-target="0m 0.45m 0m"
+    camera-orbit="-30deg 72deg 96%"
+    interaction-prompt="none"
+    style="background:transparent;">
+
+    <!-- ── HOTSPOT 1: Front Windshield / Dashcam Optics ── -->
+    <button slot="hotspot-front"
+      data-position="0.35m 0.68m 0.95m"
+      data-normal="0 0.4 1"
+      class="hotspot"
+      id="hs-front"
+      onclick="tapHotspot('front')">
+      <div class="beacon"><div class="dot"></div></div>
+      <div class="card">
+        <div class="title-row">
+          <span class="title">FRONT CAM</span>
+          <span class="badge" id="badge-lens">Rear</span>
+        </div>
+        <span class="sub">Rec &amp; Focus</span>
+      </div>
+    </button>
+
+    <!-- ── HOTSPOT 2: Cabin / Roof ── -->
+    <button slot="hotspot-cabin"
+      data-position="-0.25m 0.98m -0.35m"
+      data-normal="0 1 0"
+      class="hotspot"
+      id="hs-cabin"
+      onclick="tapHotspot('cabin')">
+      <div class="beacon"><div class="dot"></div></div>
+      <div class="card">
+        <div class="title-row">
+          <span class="title">CABIN HUB</span>
+          <span class="badge" id="badge-loop">Loop Off</span>
+        </div>
+        <span class="sub">Clip policy</span>
+      </div>
+    </button>
+  </model-viewer>
+  <div id="viewer-controls" aria-label="Controlli simulazione">
+    <button id="speed-simulation" class="viewer-control" type="button"
+      onclick="toggleSpeedSimulation()" aria-pressed="false">
+      <span class="control-dot"></span>
+      SIM SPEED
+    </button>
+  </div>
+
+  <script>
+    const mv = document.getElementById('mv');
+    const gridCanvas = document.getElementById('floor-grid');
+    const ctx = gridCanvas.getContext('2d');
+    
+    const GRID_EXTENT = 7.5;   // Estensione in metri dal centro
+    const GRID_STEP = 0.65;    // Dimensione di ogni cella della griglia
+    const FLOOR_Y = 0.0;       // Livello esatto dove poggiano le ruote
+    let gridFrame = 0;
+    let actualSpeedKmh = 0;
+    let simulatedSpeedKmh = null;
+    let wheelNodes = [];
+    let wheelRotation = 0;
+    let lastWheelFrame = 0;
+    let wheelAnimationStarted = false;
+    let floorPulse = 0;
+    let sceneSettings = {
+      frontCamera: false,
+      infinityFocus: true,
+      overlayMode: 'subtitles',
+      loopMinutes: 0,
+      recording: false,
+      paused: false,
+    };
+
+    function effectiveSpeedKmh() {
+      return simulatedSpeedKmh ?? actualSpeedKmh;
+    }
+
+    function setVehicleSpeed(speed) {
+      actualSpeedKmh = Number.isFinite(Number(speed))
+        ? Math.max(0, Number(speed))
+        : 0;
+    }
+
+    function setSceneSettings(encoded) {
+      try {
+        sceneSettings = { ...sceneSettings, ...JSON.parse(encoded) };
+        drawGrid();
+      } catch (_) {
+        // Settings are sent by the Flutter side and should always be JSON.
+      }
+    }
+
+    function toggleSpeedSimulation() {
+      simulatedSpeedKmh = simulatedSpeedKmh === null ? 40 : null;
+      const button = document.getElementById('speed-simulation');
+      button.classList.toggle('active', simulatedSpeedKmh !== null);
+      button.setAttribute('aria-pressed', simulatedSpeedKmh !== null ? 'true' : 'false');
+      button.lastChild.textContent = simulatedSpeedKmh !== null
+        ? ' SIM ON'
+        : ' SIM SPEED';
+      window.flutter_inappwebview.callHandler(
+        'speedSimulationChanged',
+        simulatedSpeedKmh,
+      );
+    }
+
+    function findWheelNodes() {
+      const scene = mv.model?.scene;
+      if (!scene || typeof scene.traverse !== 'function') return;
+      wheelNodes = [];
+      scene.traverse((node) => {
+        const name = (node.name || '').toLowerCase();
+        if (/(wheel|tire|tyre|rim|pneu)/.test(name) && node.rotation) {
+          node.matrixAutoUpdate = true;
+          wheelNodes.push(node);
+        }
+      });
+    }
+
+    function animateWheels(timestamp) {
+      const speed = effectiveSpeedKmh();
+      if (!wheelNodes.length) findWheelNodes();
+      if (lastWheelFrame === 0) lastWheelFrame = timestamp;
+      const elapsed = Math.min(timestamp - lastWheelFrame, 100);
+      lastWheelFrame = timestamp;
+      if (speed > 0 && wheelNodes.length) {
+        // A visualized wheel circumference of roughly two metres gives a
+        // readable rotation without making the model spin unrealistically.
+        wheelRotation -= (speed / 3.6 / 2) * (elapsed / 1000) * Math.PI * 2;
+        wheelNodes.forEach((node) => {
+          node.rotation.z = wheelRotation;
+          node.updateMatrix();
+        });
+        mv.model.scene.updateMatrixWorld(true);
+        // model-viewer renders on demand; this harmless camera assignment
+        // invalidates the frame after changing the Three.js wheel nodes.
+        if (typeof mv.getCameraOrbit === 'function') {
+          const orbit = mv.getCameraOrbit();
+          const nudge = Math.sin(timestamp / 1000) * 0.00001;
+          mv.cameraOrbit =
+            `${orbit.theta + nudge}rad ${orbit.phi}rad ${orbit.radius}m`;
+        }
+      }
+      requestAnimationFrame(animateWheels);
+    }
+
+    function resizeGrid() {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = gridCanvas.getBoundingClientRect();
+      gridCanvas.width = Math.round(rect.width * ratio);
+      gridCanvas.height = Math.round(rect.height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawGrid();
+    }
+
+    function drawGrid() {
+      cancelAnimationFrame(gridFrame);
+      gridFrame = requestAnimationFrame(() => {
+        const rect = gridCanvas.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        if (!width || !height) return;
+
+        ctx.clearRect(0, 0, width, height);
+
+        // Legge la camera REALE in tempo reale da model-viewer
+        let theta = -30 * Math.PI / 180;
+        let phi = 72 * Math.PI / 180;
+        let radius = 8.2;
+        let target = { x: 0, y: 0.45, z: 0 };
+        let fovDeg = 30;
+
+        if (typeof mv.getCameraOrbit === 'function') {
+          const orbit = mv.getCameraOrbit();
+          theta = orbit.theta;
+          phi = orbit.phi;
+          radius = orbit.radius || 8.2;
+        }
+        if (typeof mv.getCameraTarget === 'function') {
+          const t = mv.getCameraTarget();
+          target = { x: t.x, y: t.y, z: t.z };
+        }
+        if (typeof mv.getFieldOfView === 'function') {
+          fovDeg = mv.getFieldOfView() || 30;
+        }
+
+        const camera = {
+          x: radius * Math.sin(phi) * Math.sin(theta) + target.x,
+          y: radius * Math.cos(phi) + target.y,
+          z: radius * Math.sin(phi) * Math.cos(theta) + target.z,
+        };
+
+        const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+        const cross = (a, b) => ({
+          x: a.y * b.z - a.z * b.y,
+          y: a.z * b.x - a.x * b.z,
+          z: a.x * b.y - a.y * b.x,
+        });
+        const norm = (v) => {
+          const l = Math.hypot(v.x, v.y, v.z) || 1;
+          return { x: v.x / l, y: v.y / l, z: v.z / l };
+        };
+        const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
+        const forward = norm(sub(target, camera));
+        const right = norm(cross(forward, { x: 0, y: 1, z: 0 }));
+        const up = norm(cross(right, forward));
+
+        // Focale calcolata esattamente come fa Three.js / model-viewer sul FOV verticale
+        const fovRad = fovDeg * Math.PI / 180;
+        const focal = (height * 0.5) / Math.tan(fovRad * 0.5);
+
+        const project = (pt) => {
+          const rel = sub(pt, camera);
+          const depth = dot(rel, forward);
+          if (depth <= 0.1) return null;
+          return {
+            x: width * 0.5 + (dot(rel, right) * focal) / depth,
+            y: height * 0.5 - (dot(rel, up) * focal) / depth,
+          };
+        };
+
+        // 1. Disegna la griglia prospettica sincronizzata con l'auto
+        const steps = Math.floor(GRID_EXTENT / GRID_STEP);
+        for (let i = -steps; i <= steps; i++) {
+          const pos = i * GRID_STEP;
+          const isAxis = (i === 0);
+          ctx.lineWidth = isAxis ? 1.3 : 0.9;
+          ctx.strokeStyle = isAxis
+            ? 'rgba(56, 189, 248, 0.35)'
+            : 'rgba(56, 189, 248, 0.16)';
+
+          const segments = [
+            [{ x: pos, y: FLOOR_Y, z: -GRID_EXTENT }, { x: pos, y: FLOOR_Y, z: GRID_EXTENT }],
+            [{ x: -GRID_EXTENT, y: FLOOR_Y, z: pos }, { x: GRID_EXTENT, y: FLOOR_Y, z: pos }],
+          ];
+
+          for (const [a, b] of segments) {
+            const p1 = project(a);
+            const p2 = project(b);
+            if (!p1 || !p2) continue;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        }
+
+        // 2. Anello radar / pedana circolare attorno all'auto (richiama la UI originale)
+          const ringPulse = effectiveSpeedKmh() > 0
+            ? 0.22 + Math.abs(Math.sin(floorPulse)) * 0.28
+            : 0;
+        for (const ringRadius of [2.55, 3.25]) {
+          ctx.beginPath();
+          let started = false;
+          const ringSegs = 72;
+          for (let s = 0; s <= ringSegs; s++) {
+            const ang = (s / ringSegs) * Math.PI * 2;
+            const pt = project({
+              x: Math.cos(ang) * ringRadius,
+              y: FLOOR_Y,
+              z: Math.sin(ang) * ringRadius
+            });
+            if (!pt) continue;
+            if (!started) {
+              ctx.moveTo(pt.x, pt.y);
+              started = true;
+            } else {
+              ctx.lineTo(pt.x, pt.y);
+            }
+          }
+          ctx.lineWidth = ringRadius === 2.55 ? 1.5 : 1.0;
+          ctx.strokeStyle = ringRadius === 2.55
+            ? `rgba(56, 189, 248, ${0.48 + ringPulse})`
+            : `rgba(56, 189, 248, ${0.18 + ringPulse * 0.45})`;
+          ctx.stroke();
+        }
+
+        drawSceneEffects(project, width, height);
+      });
+    }
+
+    function drawSceneEffects(project, width, height) {
+      const lensZ = sceneSettings.frontCamera ? 1.05 : -1.05;
+      const lensColor = sceneSettings.frontCamera
+        ? '56, 189, 248'
+        : '129, 140, 248';
+      const direction = sceneSettings.frontCamera ? 1 : -1;
+      const lens = project({ x: 0, y: 0.72, z: lensZ });
+      const baseZ = direction * 4.4;
+      const baseLeft = project({ x: -1.8, y: 0.12, z: baseZ });
+      const baseRight = project({ x: 1.8, y: 0.12, z: baseZ });
+      const baseTopRight = project({ x: 1.25, y: 1.45, z: baseZ });
+      const baseTopLeft = project({ x: -1.25, y: 1.45, z: baseZ });
+
+      if (lens && baseLeft && baseRight && baseTopRight && baseTopLeft) {
+        const pulse = 0.5 + Math.abs(Math.sin(floorPulse * 0.8)) * 0.25;
+        ctx.beginPath();
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseLeft.x, baseLeft.y);
+        ctx.lineTo(baseTopLeft.x, baseTopLeft.y);
+        ctx.lineTo(baseTopRight.x, baseTopRight.y);
+        ctx.lineTo(baseRight.x, baseRight.y);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${lensColor}, ${0.08 + pulse * 0.06})`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${lensColor}, 0.72)`;
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseLeft.x, baseLeft.y);
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseRight.x, baseRight.y);
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseTopLeft.x, baseTopLeft.y);
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseTopRight.x, baseTopRight.y);
+        ctx.strokeStyle = `rgba(${lensColor}, 0.9)`;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      }
+
+      if (sceneSettings.infinityFocus && lens) {
+        for (const radius of [18, 30, 43]) {
+          ctx.beginPath();
+          ctx.arc(lens.x, lens.y, radius + Math.sin(floorPulse) * 2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(125, 211, 252, ${0.48 - radius / 120})`;
+          ctx.lineWidth = radius === 18 ? 1.5 : 0.8;
+          ctx.stroke();
+        }
+      }
+
+      if (sceneSettings.overlayMode !== 'none') {
+        const center = project({ x: 0, y: 0.58, z: lensZ * 0.92 });
+        if (center) {
+          const color = sceneSettings.overlayMode === 'burnin'
+            ? '224, 175, 87'
+            : '125, 211, 252';
+          const widthMark = sceneSettings.overlayMode === 'burnin' ? 42 : 34;
+          ctx.strokeStyle = `rgba(${color}, 0.8)`;
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(center.x - widthMark, center.y - 20, widthMark * 2, 40);
+          ctx.fillStyle = `rgba(${color}, 0.85)`;
+          ctx.font = '700 8px monospace';
+          ctx.fillText(
+            sceneSettings.overlayMode === 'burnin' ? 'BURN-IN' : 'GPS SUB',
+            center.x - widthMark + 4,
+            center.y - 25,
+          );
+        }
+      }
+
+      if (sceneSettings.loopMinutes > 0) {
+        const count = Math.min(3, Math.max(1, Math.round(sceneSettings.loopMinutes / 10)));
+        for (let i = 0; i < count; i++) {
+          const radius = 2.0 + i * 0.34;
+          ctx.beginPath();
+          for (let s = 0; s <= 40; s++) {
+            const angle = -Math.PI * 0.25 + (s / 40) * Math.PI * 1.5;
+            const point = project({
+              x: Math.cos(angle) * radius,
+              y: 0.055,
+              z: Math.sin(angle) * radius,
+            });
+            if (!point) continue;
+            if (s === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          }
+          ctx.strokeStyle = `rgba(224, 175, 87, ${0.7 - i * 0.14})`;
+          ctx.lineWidth = i === 0 ? 1.8 : 1;
+          ctx.stroke();
+        }
+      }
+
+      if (sceneSettings.recording) {
+        ctx.fillStyle = sceneSettings.paused
+          ? 'rgba(224, 175, 87, 0.8)'
+          : 'rgba(239, 83, 80, 0.9)';
+        ctx.beginPath();
+        ctx.arc(width - 22, 22, sceneSettings.paused ? 4 : 5 + Math.sin(floorPulse * 2) * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function animateFloor(timestamp) {
+      floorPulse = timestamp / 420;
+      if (effectiveSpeedKmh() > 0) drawGrid();
+      requestAnimationFrame(animateFloor);
+    }
+
+    mv.addEventListener('dblclick', resetCamera);
+    mv.addEventListener('camera-change', drawGrid);
+    mv.addEventListener('load', () => {
+      document.getElementById('scene-loader').classList.add('hidden');
+      findWheelNodes();
+      drawGrid();
+      if (!wheelAnimationStarted) {
+        wheelAnimationStarted = true;
+        requestAnimationFrame(animateWheels);
+        requestAnimationFrame(animateFloor);
+      }
+      window.flutter_inappwebview.callHandler('viewerReady');
+    });
+    window.addEventListener('resize', resizeGrid);
+    resizeGrid();
+
+    // ── Called by hotspot click ──
+    function tapHotspot(zone) {
+      window.flutter_inappwebview.callHandler('hotspotTapped', zone);
+    }
+
+    // ── Called by Flutter to reset camera ──
+    function resetCamera() {
+      mv.cameraTarget = '0m 0.45m 0m';
+      mv.cameraOrbit = '-30deg 72deg 96%';
+      drawGrid();
+    }
+
+    // ── Called by Flutter to auto-rotate toward a zone ──
+    function focusZone(zone) {
+      if (zone === 'front') {
+        mv.cameraTarget = '0.2m 0.5m 0.2m';
+        mv.cameraOrbit = '-36deg 72deg 82%';
+      } else if (zone === 'cabin') {
+        mv.cameraTarget = '-0.2m 0.55m -0.1m';
+        mv.cameraOrbit = '42deg 72deg 84%';
+      }
+      drawGrid();
+    }
+
+    // ── Highlight the active hotspot ──
+    function setActiveZone(zone) {
+      document.querySelectorAll('.hotspot').forEach(h => h.classList.remove('active'));
+      if (zone) {
+        const el = document.getElementById('hs-' + zone);
+        if (el) el.classList.add('active');
+      }
+    }
+
+    // ── Update a badge text from Flutter ──
+    function updateBadge(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+  </script>
+</body>
+</html>

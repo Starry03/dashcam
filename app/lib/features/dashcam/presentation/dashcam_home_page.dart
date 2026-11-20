@@ -15,11 +15,11 @@ import '../services/github_release_service.dart';
 import '../domain/gps_status.dart';
 import 'widgets/control_panel.dart';
 import 'widgets/elapsed_timer.dart';
-import 'widgets/quick_actions_sheet.dart';
 import 'widgets/recording_status_header.dart';
 import 'widgets/speed_indicator.dart';
-import 'widgets/stat_card.dart';
 import 'widgets/warning_banner.dart';
+import 'widgets/vehicle_visualizer.dart';
+import 'widgets/quick_actions_sheet.dart';
 
 class DashcamHomePage extends StatefulWidget {
   const DashcamHomePage({super.key});
@@ -43,6 +43,12 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   bool _infinityFocus = true;
   String _videoOverlayMode = 'subtitles';
   bool _dismissedWarning = false;
+  double? _simulatedSpeedKmh;
+
+  final GlobalKey<VehicleVisualizerState> _visualizerKey =
+      GlobalKey<VehicleVisualizerState>();
+
+  double get _displayedSpeedKmh => _simulatedSpeedKmh ?? _status.speedKmh;
 
   @override
   void initState() {
@@ -75,7 +81,6 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     _installedVersion = info.version;
     setState(() => _appVersion = 'version ${info.version}');
 
-    // Run once after app startup to avoid repeated dialogs on hot states.
     if (!_didCheckUpdates) {
       _didCheckUpdates = true;
       unawaited(_checkForGithubUpdate());
@@ -154,19 +159,18 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 onPressed: () => Navigator.of(dialogContext).pop(false),
                 child: const Text('Later'),
               ),
-              FilledButton.icon(
-                icon: const Icon(Icons.download_rounded, size: 18),
+              FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                label: const Text('Install Now'),
+                child: const Text('Download & install'),
               ),
             ],
           );
         },
       );
 
-      if (!mounted || shouldUpdate != true) return;
-
-      await _downloadAndInstallApk(release);
+      if (shouldUpdate == true) {
+        await _downloadAndInstallApk(release);
+      }
     } catch (e) {
       if (manual && mounted) {
         ScaffoldMessenger.of(
@@ -177,266 +181,152 @@ class _DashcamHomePageState extends State<DashcamHomePage>
   }
 
   Future<void> _downloadAndInstallApk(ReleaseInfo release) async {
-    final cacheDir = await DashcamPlatformBridge.getCacheDir();
-    if (cacheDir == null) {
-      final apkUri = Uri.tryParse(release.apkUrl);
-      if (apkUri != null && await canLaunchUrl(apkUri)) {
-        await launchUrl(apkUri, mode: LaunchMode.externalApplication);
+    final messenger = ScaffoldMessenger.of(context);
+    final downloadUrl = release.apkUrl;
+
+    if (downloadUrl.isEmpty) {
+      final uri = Uri.tryParse(release.htmlUrl);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
       return;
     }
 
-    final targetFile = File('$cacheDir/update_${release.version}.apk');
-    if (targetFile.existsSync()) {
-      try {
-        targetFile.deleteSync();
-      } catch (_) {}
-    }
+    final cancelToken = Completer<void>();
+    final progressNotifier = ValueNotifier<double?>(0.0);
+    final statusNotifier = ValueNotifier<String>('Starting download...');
 
-    if (!mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    var progress = 0.0;
-    var statusText = 'Connecting to GitHub...';
-    var hasError = false;
-    var errorMessage = '';
-    var started = false;
-
-    await showDialog<void>(
+    showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            void startDownload() async {
-              try {
-                final client = http.Client();
-                final request = http.Request('GET', Uri.parse(release.apkUrl));
-                final response = await client.send(request);
-
-                if (response.statusCode != 200) {
-                  throw Exception('HTTP error ${response.statusCode}');
-                }
-
-                final totalBytes = response.contentLength ?? 0;
-                var receivedBytes = 0;
-                final sink = targetFile.openWrite();
-
-                await response.stream.listen((chunk) {
-                  sink.add(chunk);
-                  receivedBytes += chunk.length;
-                  if (totalBytes > 0) {
-                    setModalState(() {
-                      progress = receivedBytes / totalBytes;
-                      final recMb = (receivedBytes / (1024 * 1024))
-                          .toStringAsFixed(1);
-                      final totMb = (totalBytes / (1024 * 1024))
-                          .toStringAsFixed(1);
-                      statusText =
-                          '$recMb MB / $totMb MB (${(progress * 100).toInt()}%)';
-                    });
-                  } else {
-                    setModalState(() {
-                      final recMb = (receivedBytes / (1024 * 1024))
-                          .toStringAsFixed(1);
-                      statusText = '$recMb MB downloaded';
-                    });
-                  }
-                }, cancelOnError: true).asFuture<void>();
-
-                await sink.flush();
-                await sink.close();
-                client.close();
-
-                if (dialogContext.mounted) {
-                  Navigator.of(dialogContext).pop();
-                }
-
-                final canInstall =
-                    await DashcamPlatformBridge.canInstallPackages();
-                if (!canInstall) {
-                  await DashcamPlatformBridge.openInstallSettings();
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Enable "Allow from this source", then reopen the update.',
-                        ),
-                        duration: Duration(seconds: 5),
-                      ),
-                    );
-                  }
-                  return;
-                }
-
-                await DashcamPlatformBridge.installApk(targetFile.path);
-              } catch (e) {
-                setModalState(() {
-                  hasError = true;
-                  errorMessage = '$e';
-                });
-              }
-            }
-
-            if (!started) {
-              started = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                startDownload();
-              });
-            }
-
-            return AlertDialog(
-              title: Text(hasError ? 'Download Failed' : 'Downloading Update'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!hasError) ...[
-                    LinearProgressIndicator(
-                      value: progress > 0 ? progress : null,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      statusText,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ] else ...[
-                    Text(
-                      'Failed to download the update:\n$errorMessage',
-                      style: const TextStyle(
-                        color: Colors.redAccent,
-                        fontSize: 13,
-                      ),
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('Updating Dashcam'),
+            content: ValueListenableBuilder<String>(
+              valueListenable: statusNotifier,
+              builder: (context, statusText, _) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(statusText),
+                    const SizedBox(height: 16),
+                    ValueListenableBuilder<double?>(
+                      valueListenable: progressNotifier,
+                      builder: (context, progress, _) {
+                        return LinearProgressIndicator(value: progress);
+                      },
                     ),
                   ],
-                ],
+                );
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (!cancelToken.isCompleted) {
+                    cancelToken.complete();
+                  }
+                  Navigator.of(dialogContext).pop();
+                },
+                child: const Text('Cancel'),
               ),
-              actions: [
-                if (hasError) ...[
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    onPressed: () async {
-                      Navigator.of(dialogContext).pop();
-                      final apkUri = Uri.tryParse(release.apkUrl);
-                      if (apkUri != null && await canLaunchUrl(apkUri)) {
-                        await launchUrl(
-                          apkUri,
-                          mode: LaunchMode.externalApplication,
-                        );
-                      }
-                    },
-                    child: const Text('Open in Browser'),
-                  ),
-                ] else ...[
-                  TextButton(
-                    onPressed: () {
-                      try {
-                        targetFile.deleteSync();
-                      } catch (_) {}
-                      Navigator.of(dialogContext).pop();
-                    },
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ],
+            ],
+          ),
+        );
+      },
+    );
+
+    File? tempFile;
+    try {
+      final cacheDirPath = await DashcamPlatformBridge.getCacheDir();
+      final apkName = 'dashcam-${release.tag}.apk';
+      tempFile = File('$cacheDirPath/$apkName');
+      if (await tempFile.exists()) {
+        await tempFile.delete();
+      }
+
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(downloadUrl));
+      request.headers['Accept'] = 'application/octet-stream';
+      request.headers['User-Agent'] = 'Dashcam-App';
+
+      final response = await client.send(request);
+      final totalBytes = response.contentLength ?? 0;
+      var receivedBytes = 0;
+
+      final sink = tempFile.openWrite();
+      var cancelled = false;
+
+      final streamSubscription = response.stream.listen(
+        (chunk) {
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          if (totalBytes > 0) {
+            progressNotifier.value = receivedBytes / totalBytes;
+            final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(
+              1,
             );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _toggleCamera() async {
-    if (_status.isRecording || _busy) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stop recording to change camera lens')),
+            final mbTotal = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
+            statusNotifier.value = 'Downloading: $mbReceived MB / $mbTotal MB';
+          }
+        },
+        onDone: () {},
+        onError: (e) {
+          throw e;
+        },
+        cancelOnError: true,
       );
-      return;
-    }
-    setState(() => _isFrontCamera = !_isFrontCamera);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isFrontCamera', _isFrontCamera);
-    await DashcamPlatformBridge.setCameraLens(_isFrontCamera);
-  }
 
-  Future<void> _changeLoopRecording() async {
-    final values = [0, 5, 10, 15, 30];
-    final labels = [
-      'Off (Save All)',
-      'Last 5 Minutes',
-      'Last 10 Minutes',
-      'Last 15 Minutes',
-      'Last 30 Minutes',
-    ];
-    final selected = await showDialog<int>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Loop Recording'),
-          content: RadioGroup<int>(
-            groupValue: _loopRecordingMinutes,
-            onChanged: (val) => Navigator.of(context).pop(val),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(values.length, (i) {
-                return RadioListTile<int>(
-                  title: Text(labels[i]),
-                  value: values[i],
-                );
-              }),
-            ),
-          ),
-        );
-      },
-    );
-    if (selected != null && selected != _loopRecordingMinutes) {
-      setState(() => _loopRecordingMinutes = selected);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('loopRecordingMinutes', selected);
-      await DashcamPlatformBridge.setLoopRecordingMinutes(selected);
+      await Future.any([
+        streamSubscription.asFuture<void>(),
+        cancelToken.future.then((_) {
+          cancelled = true;
+          streamSubscription.cancel();
+        }),
+      ]);
+
+      await sink.flush();
+      await sink.close();
+      client.close();
+
+      if (cancelled) {
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+        return;
+      }
+
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
+      statusNotifier.value = 'Launching installer...';
+      await DashcamPlatformBridge.installApk(tempFile.path);
+    } catch (e) {
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('Download or install failed: $e')),
+      );
     }
   }
 
-  Future<void> _changeOverlayMode() async {
-    final values = ['subtitles', 'burnin', 'none'];
-    final labels = [
-      'Subtitles Track (No Heat - Recommended)',
-      'Burn-in on Video (High CPU / Heat)',
-      'Off (No Text Overlay)',
-    ];
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Video Overlay'),
-          content: RadioGroup<String>(
-            groupValue: _videoOverlayMode,
-            onChanged: (val) => Navigator.of(context).pop(val),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(values.length, (i) {
-                return RadioListTile<String>(
-                  title: Text(labels[i]),
-                  value: values[i],
-                );
-              }),
-            ),
-          ),
-        );
-      },
-    );
-    if (selected != null && selected != _videoOverlayMode) {
-      setState(() => _videoOverlayMode = selected);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('videoOverlayMode', selected);
-      await DashcamPlatformBridge.setVideoOverlayMode(selected);
+  void _startStatusRefreshTicker() {
+    _statusRefreshTimer?.cancel();
+    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      unawaited(DashcamPlatformBridge.refreshStatus());
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(DashcamPlatformBridge.refreshStatus());
     }
   }
 
@@ -448,15 +338,34 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     super.dispose();
   }
 
-  void _startStatusRefreshTicker() {
-    _statusRefreshTimer?.cancel();
-    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      unawaited(DashcamPlatformBridge.refreshStatus());
-    });
+  Future<void> _toggleCamera() async {
+    if (_busy || _status.isRecording) return;
+    final next = !_isFrontCamera;
+    setState(() => _isFrontCamera = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isFrontCamera', next);
+    await DashcamPlatformBridge.setCameraLens(next);
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {}
+  Future<void> _changeLoopRecording() async {
+    const modes = [0, 5, 10, 15, 30];
+    final nextIndex = (modes.indexOf(_loopRecordingMinutes) + 1) % modes.length;
+    final nextValue = modes[nextIndex];
+    setState(() => _loopRecordingMinutes = nextValue);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('loopRecordingMinutes', nextValue);
+    await DashcamPlatformBridge.setLoopRecordingMinutes(nextValue);
+  }
+
+  Future<void> _changeOverlayMode() async {
+    const modes = ['subtitles', 'burnin', 'none'];
+    final nextIndex = (modes.indexOf(_videoOverlayMode) + 1) % modes.length;
+    final nextValue = modes[nextIndex];
+    setState(() => _videoOverlayMode = nextValue);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('videoOverlayMode', nextValue);
+    await DashcamPlatformBridge.setVideoOverlayMode(nextValue);
+  }
 
   Future<void> _toggleRecording() async {
     if (_busy) return;
@@ -534,114 +443,146 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     await DashcamPlatformBridge.setInfinityFocus(enabled);
   }
 
-  void _openQuickActionsSheet() {
-    if (!mounted) return;
-    unawaited(
-      showQuickActionsSheet(
-        context,
-        isFrontCamera: _isFrontCamera,
-        isRecording: _status.isRecording,
-        loopRecordingMinutes: _loopRecordingMinutes,
-        infinityFocus: _infinityFocus,
-        videoOverlayMode: _videoOverlayMode,
-        onSwitchLens: () => unawaited(_toggleCamera()),
-        onLock: () => unawaited(_lockIncident()),
-        onOpenGallery: () => unawaited(_openGallery()),
-        onChangeLoopRecording: () => unawaited(_changeLoopRecording()),
-        onToggleInfinityFocus: (val) => unawaited(_toggleInfinityFocus(val)),
-        onChangeOverlayMode: () => unawaited(_changeOverlayMode()),
-        onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
-      ),
+  void _openGenericSettings() {
+    showPhoneSettingsSheet(
+      context,
+      freeStorageMb: _status.freeStorageMb,
+      appVersion: _appVersion,
+      onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
+      onOpenGallery: () => unawaited(_openGallery()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF121212),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                RecordingStatusHeader(
-                  isRecording: _status.isRecording,
-                  isPaused: _status.isPaused,
-                ),
-                const SizedBox(height: 24),
-                ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
-                const SizedBox(height: 12),
-                SpeedIndicator(
-                  speedKmh: _status.speedKmh,
-                  gpsStatus: _status.hasGpsFix
-                      ? GpsUiStatus.active
-                      : GpsUiStatus.weakSignal,
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: StatCard(
-                        label: 'Free Storage',
-                        value: _status.freeStorageMb >= 1024
-                            ? '${(_status.freeStorageMb / 1024).toStringAsFixed(1)} GB'
-                            : '${_status.freeStorageMb} MB',
-                        icon: Icons.storage_rounded,
+          padding: const EdgeInsets.symmetric(vertical: 10.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Top Status HUD Header (Reset 3D / Recording Status / Generic Settings)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    onPressed: () =>
+                        _visualizerKey.currentState?.resetCameraOrbit(),
+                    icon: const Icon(
+                      Icons.view_in_ar_rounded,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                    tooltip: 'Centra vista 3D',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x1AFFFFFF),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: const BorderSide(color: Color(0x14FFFFFF)),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: StatCard(
-                        label: 'Last Clip',
-                        value: _status.lastSegment == '-'
-                            ? 'None'
-                            : _status.lastSegment,
-                        icon: Icons.video_file_rounded,
-                        onTap: () => unawaited(_openGallery()),
-                        trailing: _status.lastSegmentLocked
-                            ? const Icon(
-                                Icons.shield,
-                                color: Colors.orange,
-                                size: 16,
-                              )
-                            : null,
+                  ),
+                  RecordingStatusHeader(
+                    isRecording: _status.isRecording,
+                    isPaused: _status.isPaused,
+                  ),
+                  IconButton(
+                    onPressed: _openGenericSettings,
+                    icon: const Icon(
+                      Icons.settings_outlined,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                    tooltip: 'Impostazioni Telefono & Sistema',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x1AFFFFFF),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: const BorderSide(color: Color(0x14FFFFFF)),
                       ),
                     ),
-                  ],
-                ),
-                if (_status.warning.isNotEmpty && !_dismissedWarning) ...[
-                  const SizedBox(height: 12),
-                  WarningBanner(
-                    message: _status.warning,
-                    onDismiss: () => setState(() => _dismissedWarning = true),
                   ),
                 ],
-                if (_error.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  WarningBanner(
-                    message: _error,
-                    onDismiss: () => setState(() => _error = ''),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                ControlPanel(
+              ),
+              const SizedBox(height: 8),
+
+              // Elapsed Recording Timer (00:00:00)
+              ElapsedTimer(elapsedSeconds: _status.elapsedSeconds),
+              const SizedBox(height: 6),
+
+              // Speed & GPS Indicator
+              SpeedIndicator(
+                speedKmh: _displayedSpeedKmh,
+                gpsStatus: _status.hasGpsFix
+                    ? GpsUiStatus.active
+                    : GpsUiStatus.weakSignal,
+              ),
+              const SizedBox(height: 4),
+
+              // 3D Automotive Visualizer (Rendered directly on single window)
+              Expanded(
+                child: VehicleVisualizer(
+                  key: _visualizerKey,
                   isRecording: _status.isRecording,
                   isPaused: _status.isPaused,
-                  busy: _busy,
-                  onToggleRecording: () => unawaited(_toggleRecording()),
-                  onTogglePause: () => unawaited(_togglePause()),
-                  onLock: () => unawaited(_lockIncident()),
-                  onQuickActions: _openQuickActionsSheet,
+                  speedKmh: _displayedSpeedKmh,
+                  isFrontCamera: _isFrontCamera,
+                  infinityFocus: _infinityFocus,
+                  videoOverlayMode: _videoOverlayMode,
+                  loopRecordingMinutes: _loopRecordingMinutes,
+                  onSwitchLens: _toggleCamera,
+                  onToggleInfinityFocus: _toggleInfinityFocus,
+                  onChangeOverlayMode: _changeOverlayMode,
+                  onChangeLoopRecording: _changeLoopRecording,
+                  onOpenGallery: _openGallery,
+                  onSpeedSimulationChanged: (speed) => setState(() {
+                    _simulatedSpeedKmh = speed;
+                  }),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  _appVersion,
-                  style: const TextStyle(color: Colors.white24, fontSize: 11),
+              ),
+              const SizedBox(height: 8),
+
+              // Optional Warnings or Errors
+              if (_status.warning.isNotEmpty && !_dismissedWarning ||
+                  _error.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                WarningBanner(
+                  message: _error.isNotEmpty ? _error : _status.warning,
+                  onDismiss: () => setState(() {
+                    if (_error.isNotEmpty) {
+                      _error = '';
+                    } else {
+                      _dismissedWarning = true;
+                    }
+                  }),
                 ),
               ],
-            ),
+              const SizedBox(height: 10),
+
+              // Primary Action Control Panel (Start, Stop, Lock Incident, Pause)
+              ControlPanel(
+                isRecording: _status.isRecording,
+                isPaused: _status.isPaused,
+                busy: _busy,
+                onToggleRecording: () => unawaited(_toggleRecording()),
+                onTogglePause: () => unawaited(_togglePause()),
+                onLock: () => unawaited(_lockIncident()),
+              ),
+              const SizedBox(height: 8),
+
+              // App Version (Subtle Footer)
+              Text(
+                _appVersion,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white24,
+                  fontSize: 10,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
           ),
         ),
       ),

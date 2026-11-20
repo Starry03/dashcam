@@ -50,45 +50,54 @@ class SpeedIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = _gpsStyle();
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha(12),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withAlpha(25)),
+            color: const Color(0xCC151A20),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white.withAlpha(18)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.speed_rounded, color: Colors.white70, size: 22),
-              const SizedBox(width: 10),
+              const Icon(
+                Icons.speed_rounded,
+                color: Color(0xFF75B8CA),
+                size: 16,
+              ),
+              const SizedBox(width: 7),
               Text(
                 '${speedKmh.toStringAsFixed(1)} km/h',
                 style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 6),
-        Opacity(
-          opacity: gpsStatus == GpsUiStatus.active ? 0.72 : 0.9,
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+          decoration: BoxDecoration(
+            color: style.color.withAlpha(18),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: style.color.withAlpha(45)),
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(style.icon, size: 12, color: style.color),
-              const SizedBox(width: 4),
+              Icon(style.icon, size: 13, color: style.color),
+              const SizedBox(width: 5),
               Text(
                 style.label,
                 style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.2,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
                   color: style.color,
                 ),
               ),
