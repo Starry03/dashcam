@@ -17,7 +17,6 @@ import 'widgets/control_panel.dart';
 import 'widgets/elapsed_timer.dart';
 import 'widgets/recording_status_header.dart';
 import 'widgets/speed_indicator.dart';
-import 'widgets/stat_card.dart';
 import 'widgets/warning_banner.dart';
 import 'widgets/vehicle_visualizer.dart';
 import 'widgets/quick_actions_sheet.dart';
@@ -538,40 +537,6 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                 ),
               ),
               const SizedBox(height: 8),
-
-              // Free Storage & Last Clip Telemetry Row
-              Row(
-                children: [
-                  Expanded(
-                    child: StatCard(
-                      label: 'Free Storage',
-                      value: _status.freeStorageMb >= 1024
-                          ? '${(_status.freeStorageMb / 1024).toStringAsFixed(1)} GB'
-                          : '${_status.freeStorageMb} MB',
-                      icon: Icons.storage_rounded,
-                      onTap: _openGenericSettings,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: StatCard(
-                      label: 'Last Clip',
-                      value: _status.lastSegment == '-'
-                          ? 'None'
-                          : _status.lastSegment,
-                      icon: Icons.video_file_rounded,
-                      onTap: () => unawaited(_openGallery()),
-                      trailing: _status.lastSegmentLocked
-                          ? const Icon(
-                              Icons.shield,
-                              color: Colors.orange,
-                              size: 16,
-                            )
-                          : null,
-                    ),
-                  ),
-                ],
-              ),
 
               // Optional Warnings or Errors
               if (_status.warning.isNotEmpty && !_dismissedWarning ||
