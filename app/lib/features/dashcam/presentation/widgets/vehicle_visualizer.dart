@@ -101,7 +101,7 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
     final modelViewerScript = await rootBundle.loadString(
       'packages/flutter_3d_controller/assets/model_viewer.min.js',
     );
-    final model = await rootBundle.load('assets/models/sedan-sports.glb');
+    final model = await rootBundle.load('assets/models/sport_car_dark.glb');
     final modelData = base64Encode(
       model.buffer.asUint8List(model.offsetInBytes, model.lengthInBytes),
     );
@@ -259,7 +259,7 @@ class _FrontOpticsQuickCard extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               const Text(
-                'PARABREZZA · DASHCAM OPTICS',
+                'DASHCAM OPTICS',
                 style: TextStyle(
                   color: Color(0xFF38BDF8),
                   fontSize: 9.5,
@@ -432,7 +432,7 @@ class _CabinHubQuickCard extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               const Text(
-                'ABITACOLO · CLIP & LOOP',
+                'CLIP & LOOP',
                 style: TextStyle(
                   color: Color(0xFF38BDF8),
                   fontSize: 9.5,
@@ -473,34 +473,6 @@ class _CabinHubQuickCard extends StatelessWidget {
                           color: Colors.white,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Open Gallery (HTML line 955)
-              Expanded(
-                child: Material(
-                  color: const Color(0x2838BDF8),
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    onTap: onOpenGallery,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0x6638BDF8)),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: const Text(
-                        'Open Gallery →',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFF38BDF8),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
