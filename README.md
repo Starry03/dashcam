@@ -4,7 +4,7 @@
 
 Dashcam is a Flutter (Kotlin/CameraX) app that turns your phone into a practical in-car dashcam with foreground recording, loop management, and quick controls.
 
-<p>
+<p align="center">
   <img src="./assets/home.jpg" alt="Home screen" width="250" />
 </p>
 
