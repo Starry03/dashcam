@@ -8,13 +8,31 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
 
+    body {
+      position: relative;
+    }
+
     model-viewer {
+      position: relative;
+      z-index: 1;
       width: 100%;
       height: 100%;
       background: transparent;
       --progress-bar-color: transparent;
       --progress-mask: transparent;
       touch-action: none;
+    }
+
+    #floor-grid {
+      position: absolute;
+      z-index: 0;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      /* Dissolvenza radiale elegante verso lo sfondo scuro */
+      -webkit-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 68%);
+      mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 68%);
     }
 
     /* ── Spatial Hotspot Pin (beacon + label card) ── */
@@ -28,7 +46,6 @@
       cursor: pointer;
       outline: none;
       white-space: nowrap;
-      /* model-viewer uses visibility:hidden when behind mesh */
     }
 
     .beacon {
@@ -91,19 +108,23 @@
   </style>
 </head>
 <body>
+  <canvas id="floor-grid" aria-hidden="true"></canvas>
   <model-viewer
     id="mv"
     src="data:model/gltf-binary;base64,__MODEL_DATA__"
     camera-controls
+    disable-pan
+    min-camera-orbit="-180deg 72deg 80%"
+    max-camera-orbit="180deg 72deg 105%"
     camera-target="0m 0.45m 0m"
-    camera-orbit="-30deg 72deg 75%"
+    camera-orbit="-30deg 72deg 96%"
     interaction-prompt="none"
     style="background:transparent;">
 
     <!-- ── HOTSPOT 1: Front Windshield / Dashcam Optics ── -->
     <button slot="hotspot-front"
-      data-position="0.65m 0.58m 0.38m"
-      data-normal="0 0.3 1"
+      data-position="0.35m 0.68m 0.95m"
+      data-normal="0 0.4 1"
       class="hotspot"
       id="hs-front"
       onclick="tapHotspot('front')">
@@ -119,7 +140,7 @@
 
     <!-- ── HOTSPOT 2: Cabin / Roof ── -->
     <button slot="hotspot-cabin"
-      data-position="-0.15m 0.74m -0.12m"
+      data-position="-0.25m 0.98m -0.35m"
       data-normal="0 1 0"
       class="hotspot"
       id="hs-cabin"
@@ -137,7 +158,153 @@
 
   <script>
     const mv = document.getElementById('mv');
+    const gridCanvas = document.getElementById('floor-grid');
+    const ctx = gridCanvas.getContext('2d');
+    
+    const GRID_EXTENT = 7.5;   // Estensione in metri dal centro
+    const GRID_STEP = 0.65;    // Dimensione di ogni cella della griglia
+    const FLOOR_Y = 0.0;       // Livello esatto dove poggiano le ruote
+    let gridFrame = 0;
+
+    function resizeGrid() {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = gridCanvas.getBoundingClientRect();
+      gridCanvas.width = Math.round(rect.width * ratio);
+      gridCanvas.height = Math.round(rect.height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawGrid();
+    }
+
+    function drawGrid() {
+      cancelAnimationFrame(gridFrame);
+      gridFrame = requestAnimationFrame(() => {
+        const rect = gridCanvas.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        if (!width || !height) return;
+
+        ctx.clearRect(0, 0, width, height);
+
+        // Legge la camera REALE in tempo reale da model-viewer
+        let theta = -30 * Math.PI / 180;
+        let phi = 72 * Math.PI / 180;
+        let radius = 8.2;
+        let target = { x: 0, y: 0.45, z: 0 };
+        let fovDeg = 30;
+
+        if (typeof mv.getCameraOrbit === 'function') {
+          const orbit = mv.getCameraOrbit();
+          theta = orbit.theta;
+          phi = orbit.phi;
+          radius = orbit.radius || 8.2;
+        }
+        if (typeof mv.getCameraTarget === 'function') {
+          const t = mv.getCameraTarget();
+          target = { x: t.x, y: t.y, z: t.z };
+        }
+        if (typeof mv.getFieldOfView === 'function') {
+          fovDeg = mv.getFieldOfView() || 30;
+        }
+
+        const camera = {
+          x: radius * Math.sin(phi) * Math.sin(theta) + target.x,
+          y: radius * Math.cos(phi) + target.y,
+          z: radius * Math.sin(phi) * Math.cos(theta) + target.z,
+        };
+
+        const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+        const cross = (a, b) => ({
+          x: a.y * b.z - a.z * b.y,
+          y: a.z * b.x - a.x * b.z,
+          z: a.x * b.y - a.y * b.x,
+        });
+        const norm = (v) => {
+          const l = Math.hypot(v.x, v.y, v.z) || 1;
+          return { x: v.x / l, y: v.y / l, z: v.z / l };
+        };
+        const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
+        const forward = norm(sub(target, camera));
+        const right = norm(cross(forward, { x: 0, y: 1, z: 0 }));
+        const up = norm(cross(right, forward));
+
+        // Focale calcolata esattamente come fa Three.js / model-viewer sul FOV verticale
+        const fovRad = fovDeg * Math.PI / 180;
+        const focal = (height * 0.5) / Math.tan(fovRad * 0.5);
+
+        const project = (pt) => {
+          const rel = sub(pt, camera);
+          const depth = dot(rel, forward);
+          if (depth <= 0.1) return null;
+          return {
+            x: width * 0.5 + (dot(rel, right) * focal) / depth,
+            y: height * 0.5 - (dot(rel, up) * focal) / depth,
+          };
+        };
+
+        // 1. Disegna la griglia prospettica sincronizzata con l'auto
+        const steps = Math.floor(GRID_EXTENT / GRID_STEP);
+        for (let i = -steps; i <= steps; i++) {
+          const pos = i * GRID_STEP;
+          const isAxis = (i === 0);
+          ctx.lineWidth = isAxis ? 1.3 : 0.9;
+          ctx.strokeStyle = isAxis
+            ? 'rgba(56, 189, 248, 0.35)'
+            : 'rgba(56, 189, 248, 0.16)';
+
+          const segments = [
+            [{ x: pos, y: FLOOR_Y, z: -GRID_EXTENT }, { x: pos, y: FLOOR_Y, z: GRID_EXTENT }],
+            [{ x: -GRID_EXTENT, y: FLOOR_Y, z: pos }, { x: GRID_EXTENT, y: FLOOR_Y, z: pos }],
+          ];
+
+          for (const [a, b] of segments) {
+            const p1 = project(a);
+            const p2 = project(b);
+            if (!p1 || !p2) continue;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        }
+
+        // 2. Anello radar / pedana circolare attorno all'auto (richiama la UI originale)
+        for (const ringRadius of [2.55, 3.25]) {
+          ctx.beginPath();
+          let started = false;
+          const ringSegs = 72;
+          for (let s = 0; s <= ringSegs; s++) {
+            const ang = (s / ringSegs) * Math.PI * 2;
+            const pt = project({
+              x: Math.cos(ang) * ringRadius,
+              y: FLOOR_Y,
+              z: Math.sin(ang) * ringRadius
+            });
+            if (!pt) continue;
+            if (!started) {
+              ctx.moveTo(pt.x, pt.y);
+              started = true;
+            } else {
+              ctx.lineTo(pt.x, pt.y);
+            }
+          }
+          ctx.lineWidth = ringRadius === 2.55 ? 1.5 : 1.0;
+          ctx.strokeStyle = ringRadius === 2.55
+            ? 'rgba(56, 189, 248, 0.48)'
+            : 'rgba(56, 189, 248, 0.18)';
+          ctx.stroke();
+        }
+      });
+    }
+
     mv.addEventListener('dblclick', resetCamera);
+    mv.addEventListener('camera-change', drawGrid);
+    mv.addEventListener('load', () => {
+      drawGrid();
+      window.flutter_inappwebview.callHandler('viewerReady');
+    });
+    window.addEventListener('resize', resizeGrid);
+    resizeGrid();
 
     // ── Called by hotspot click ──
     function tapHotspot(zone) {
@@ -146,19 +313,21 @@
 
     // ── Called by Flutter to reset camera ──
     function resetCamera() {
-      mv.setAttribute('camera-target', '0m 0.45m 0m');
-      mv.setAttribute('camera-orbit', '-30deg 72deg 75%');
+      mv.cameraTarget = '0m 0.45m 0m';
+      mv.cameraOrbit = '-30deg 72deg 96%';
+      drawGrid();
     }
 
     // ── Called by Flutter to auto-rotate toward a zone ──
     function focusZone(zone) {
       if (zone === 'front') {
-        mv.setAttribute('camera-target', '0.2m 0.5m 0.2m');
-        mv.setAttribute('camera-orbit', '-36deg 74deg 65%');
+        mv.cameraTarget = '0.2m 0.5m 0.2m';
+        mv.cameraOrbit = '-36deg 72deg 82%';
       } else if (zone === 'cabin') {
-        mv.setAttribute('camera-target', '-0.2m 0.55m -0.1m');
-        mv.setAttribute('camera-orbit', '42deg 66deg 68%');
+        mv.cameraTarget = '-0.2m 0.55m -0.1m';
+        mv.cameraOrbit = '42deg 72deg 84%';
       }
+      drawGrid();
     }
 
     // ── Highlight the active hotspot ──
@@ -175,11 +344,6 @@
       const el = document.getElementById(id);
       if (el) el.textContent = value;
     }
-
-    // ── Notify Flutter when WebView is ready ──
-    mv.addEventListener('load', () => {
-      window.flutter_inappwebview.callHandler('viewerReady');
-    });
   </script>
 </body>
 </html>
