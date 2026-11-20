@@ -123,10 +123,8 @@ Future<void> showPhoneSettingsSheet(
   BuildContext context, {
   required int freeStorageMb,
   required String appVersion,
-  required int loopRecordingMinutes,
-  required VoidCallback onChangeLoopRecording,
-  required VoidCallback onOpenGallery,
   required VoidCallback onCheckUpdates,
+  required VoidCallback onOpenGallery,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -138,9 +136,10 @@ Future<void> showPhoneSettingsSheet(
       final freeGb = freeStorageMb / 1024;
       return SafeArea(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
               child: Row(
                 children: [
                   const Expanded(
@@ -150,7 +149,7 @@ Future<void> showPhoneSettingsSheet(
                         Text(
                           'DEVICE & SYSTEM',
                           style: TextStyle(
-                            color: Color(0xFF87B8C6),
+                            color: Color(0xFF38BDF8),
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 1.8,
@@ -158,11 +157,11 @@ Future<void> showPhoneSettingsSheet(
                         ),
                         SizedBox(height: 3),
                         Text(
-                          'Phone settings',
+                          'Phone & App Settings',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w500,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
@@ -170,17 +169,22 @@ Future<void> showPhoneSettingsSheet(
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(sheetContext).pop(),
-                    icon: const Icon(Icons.close_rounded),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white70,
+                    ),
                   ),
                 ],
               ),
             ),
             const Divider(height: 1, color: Color(0x1AFFFFFF)),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: const Color(0xCC151A20),
@@ -199,13 +203,13 @@ Future<void> showPhoneSettingsSheet(
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 8),
                         Text(
                           '${freeGb.toStringAsFixed(1)} GB free',
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w300,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                       ],
@@ -213,24 +217,22 @@ Future<void> showPhoneSettingsSheet(
                   ),
                   const SizedBox(height: 12),
                   _ActionCard(
-                    icon: Icons.loop_rounded,
-                    title: 'Loop recording',
-                    subtitle: loopRecordingMinutes == 0
-                        ? 'Save all'
-                        : '$loopRecordingMinutes min retention',
-                    onTap: onChangeLoopRecording,
-                  ),
-                  _ActionCard(
-                    icon: Icons.video_library_rounded,
-                    title: 'Saved clips',
-                    subtitle: 'Movies / Dashcam',
-                    onTap: onOpenGallery,
-                  ),
-                  _ActionCard(
                     icon: Icons.system_update_rounded,
                     title: 'Check for updates',
-                    subtitle: appVersion,
-                    onTap: onCheckUpdates,
+                    subtitle: 'Installed: $appVersion',
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      onCheckUpdates();
+                    },
+                  ),
+                  _ActionCard(
+                    icon: Icons.folder_open_rounded,
+                    title: 'Open video folder',
+                    subtitle: 'Movies / Dashcam',
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      onOpenGallery();
+                    },
                   ),
                 ],
               ),

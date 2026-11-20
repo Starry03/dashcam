@@ -64,7 +64,7 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
     super.dispose();
   }
 
-  void _resetCameraOrbit() {
+  void resetCameraOrbit() {
     setState(() => _activeZone = null);
     _applyDefaultCamera();
   }
@@ -103,7 +103,7 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
           children: [
             Positioned.fill(
               child: GestureDetector(
-                onDoubleTap: _resetCameraOrbit,
+                onDoubleTap: resetCameraOrbit,
                 child: Flutter3DViewer(
                   src: 'assets/models/sedan-sports.glb',
                   controller: _modelController,
@@ -198,73 +198,115 @@ class _SpatialHotspotButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xEB111621), // glass-card rgba(17, 22, 33, 0.68)
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: active ? accentColor : accentColor.withValues(alpha: 0.35),
-            width: active ? 1.5 : 1.0,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.75),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Circular pulsing beacon ring + center dot (matches user screenshot and HTML)
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: accentColor.withValues(alpha: 0.20),
+              border: Border.all(
+                color: accentColor.withValues(alpha: 0.75),
+                width: 1.3,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: accentColor.withValues(alpha: 0.45),
+                  blurRadius: 12,
+                  spreadRadius: 1,
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+            child: Center(
+              child: Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accentColor,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(
+                0xEB111621,
+              ), // glass-card rgba(17, 22, 33, 0.68)
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: active
+                    ? accentColor
+                    : accentColor.withValues(alpha: 0.35),
+                width: active ? 1.5 : 1.0,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.75),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: accentColor,
-                    fontSize: 8.5,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.1,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4.5,
-                    vertical: 1.5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.20),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    badgeText,
-                    style: TextStyle(
-                      color: accentColor,
-                      fontSize: 8,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w600,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: accentColor,
+                        fontSize: 8.5,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.1,
+                      ),
                     ),
+                    const SizedBox(width: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4.5,
+                        vertical: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.20),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        badgeText,
+                        style: TextStyle(
+                          color: accentColor,
+                          fontSize: 8,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

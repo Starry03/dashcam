@@ -20,6 +20,7 @@ import 'widgets/speed_indicator.dart';
 import 'widgets/stat_card.dart';
 import 'widgets/warning_banner.dart';
 import 'widgets/vehicle_visualizer.dart';
+import 'widgets/quick_actions_sheet.dart';
 
 class DashcamHomePage extends StatefulWidget {
   const DashcamHomePage({super.key});
@@ -440,6 +441,16 @@ class _DashcamHomePageState extends State<DashcamHomePage>
     await DashcamPlatformBridge.setInfinityFocus(enabled);
   }
 
+  void _openGenericSettings() {
+    showPhoneSettingsSheet(
+      context,
+      freeStorageMb: _status.freeStorageMb,
+      appVersion: _appVersion,
+      onCheckUpdates: () => unawaited(_checkForGithubUpdate(manual: true)),
+      onOpenGallery: () => unawaited(_openGallery()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -450,10 +461,48 @@ class _DashcamHomePageState extends State<DashcamHomePage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Top Status Header (● READY / ● RECORDING / ● PAUSED)
-              RecordingStatusHeader(
-                isRecording: _status.isRecording,
-                isPaused: _status.isPaused,
+              // Top Status HUD Header (Reset 3D / Recording Status / Generic Settings)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    onPressed: () =>
+                        _visualizerKey.currentState?.resetCameraOrbit(),
+                    icon: const Icon(
+                      Icons.view_in_ar_rounded,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                    tooltip: 'Centra vista 3D',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x1AFFFFFF),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: const BorderSide(color: Color(0x14FFFFFF)),
+                      ),
+                    ),
+                  ),
+                  RecordingStatusHeader(
+                    isRecording: _status.isRecording,
+                    isPaused: _status.isPaused,
+                  ),
+                  IconButton(
+                    onPressed: _openGenericSettings,
+                    icon: const Icon(
+                      Icons.settings_outlined,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                    tooltip: 'Impostazioni Telefono & Sistema',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0x1AFFFFFF),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: const BorderSide(color: Color(0x14FFFFFF)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
 
@@ -551,6 +600,7 @@ class _DashcamHomePageState extends State<DashcamHomePage>
                           ? '${(_status.freeStorageMb / 1024).toStringAsFixed(1)} GB'
                           : '${_status.freeStorageMb} MB',
                       icon: Icons.storage_rounded,
+                      onTap: _openGenericSettings,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -602,17 +652,14 @@ class _DashcamHomePageState extends State<DashcamHomePage>
               ),
               const SizedBox(height: 8),
 
-              // Version & Check Updates
-              GestureDetector(
-                onTap: () => unawaited(_checkForGithubUpdate(manual: true)),
-                child: Text(
-                  _appVersion,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white30,
-                    fontSize: 10,
-                    letterSpacing: 0.8,
-                  ),
+              // App Version (Subtle Footer)
+              Text(
+                _appVersion,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white24,
+                  fontSize: 10,
+                  letterSpacing: 0.8,
                 ),
               ),
             ],
