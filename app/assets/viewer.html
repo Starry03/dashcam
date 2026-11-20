@@ -23,6 +23,81 @@
       touch-action: none;
     }
 
+    #scene-loader {
+      position: absolute;
+      z-index: 5;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      background: radial-gradient(
+        circle at 50% 46%,
+        rgba(21, 32, 43, 0.72),
+        rgba(7, 12, 18, 0.9) 72%
+      );
+      opacity: 1;
+      transition: opacity .35s ease, visibility .35s ease;
+    }
+    #scene-loader.hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+    .loader-hud {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: #b7dff0;
+      font: 700 9px 'Courier New', monospace;
+      letter-spacing: 1.6px;
+    }
+    .loader-orbit {
+      position: relative;
+      width: 52px;
+      height: 52px;
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 50%;
+      box-shadow: 0 0 22px rgba(56, 189, 248, 0.14);
+      animation: loaderSpin 1.8s linear infinite;
+    }
+    .loader-orbit::before,
+    .loader-orbit::after {
+      content: '';
+      position: absolute;
+      inset: 7px;
+      border: 1px solid rgba(56, 189, 248, 0.55);
+      border-left-color: transparent;
+      border-radius: 50%;
+    }
+    .loader-orbit::after {
+      inset: 17px;
+      border-color: #38BDF8;
+      border-right-color: transparent;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.75);
+      animation: loaderSpinReverse 1s linear infinite;
+    }
+    .loader-core {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #38BDF8;
+      box-shadow: 0 0 12px #38BDF8;
+      transform: translate(-50%, -50%);
+    }
+    .loader-caption {
+      opacity: .8;
+    }
+    @keyframes loaderSpin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes loaderSpinReverse {
+      to { transform: rotate(-360deg); }
+    }
+
     #viewer-controls {
       position: absolute;
       z-index: 3;
@@ -81,7 +156,7 @@
 
     #floor-grid {
       position: absolute;
-      z-index: 0;
+      z-index: 2;
       inset: 0;
       width: 100%;
       height: 100%;
@@ -180,6 +255,14 @@
 </head>
 <body>
   <canvas id="floor-grid" aria-hidden="true"></canvas>
+  <div id="scene-loader" role="status" aria-label="Loading 3D scene">
+    <div class="loader-hud">
+      <div class="loader-orbit">
+        <div class="loader-core"></div>
+      </div>
+      <span class="loader-caption">INITIALIZING VEHICLE HUD</span>
+    </div>
+  </div>
   <model-viewer
     id="mv"
     src="data:model/gltf-binary;base64,__MODEL_DATA__"
@@ -250,6 +333,14 @@
     let lastWheelFrame = 0;
     let wheelAnimationStarted = false;
     let floorPulse = 0;
+    let sceneSettings = {
+      frontCamera: false,
+      infinityFocus: true,
+      overlayMode: 'subtitles',
+      loopMinutes: 0,
+      recording: false,
+      paused: false,
+    };
 
     function effectiveSpeedKmh() {
       return simulatedSpeedKmh ?? actualSpeedKmh;
@@ -259,6 +350,15 @@
       actualSpeedKmh = Number.isFinite(Number(speed))
         ? Math.max(0, Number(speed))
         : 0;
+    }
+
+    function setSceneSettings(encoded) {
+      try {
+        sceneSettings = { ...sceneSettings, ...JSON.parse(encoded) };
+        drawGrid();
+      } catch (_) {
+        // Settings are sent by the Flutter side and should always be JSON.
+      }
     }
 
     function toggleSpeedSimulation() {
@@ -446,7 +546,113 @@
             : `rgba(56, 189, 248, ${0.18 + ringPulse * 0.45})`;
           ctx.stroke();
         }
+
+        drawSceneEffects(project, width, height);
       });
+    }
+
+    function drawSceneEffects(project, width, height) {
+      const lensZ = sceneSettings.frontCamera ? 1.05 : -1.05;
+      const lensColor = sceneSettings.frontCamera
+        ? '56, 189, 248'
+        : '129, 140, 248';
+      const direction = sceneSettings.frontCamera ? 1 : -1;
+      const lens = project({ x: 0, y: 0.72, z: lensZ });
+      const baseZ = direction * 4.4;
+      const baseLeft = project({ x: -1.8, y: 0.12, z: baseZ });
+      const baseRight = project({ x: 1.8, y: 0.12, z: baseZ });
+      const baseTopRight = project({ x: 1.25, y: 1.45, z: baseZ });
+      const baseTopLeft = project({ x: -1.25, y: 1.45, z: baseZ });
+
+      if (lens && baseLeft && baseRight && baseTopRight && baseTopLeft) {
+        const pulse = 0.5 + Math.abs(Math.sin(floorPulse * 0.8)) * 0.25;
+        ctx.beginPath();
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseLeft.x, baseLeft.y);
+        ctx.lineTo(baseTopLeft.x, baseTopLeft.y);
+        ctx.lineTo(baseTopRight.x, baseTopRight.y);
+        ctx.lineTo(baseRight.x, baseRight.y);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${lensColor}, ${0.08 + pulse * 0.06})`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${lensColor}, 0.72)`;
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseLeft.x, baseLeft.y);
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseRight.x, baseRight.y);
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseTopLeft.x, baseTopLeft.y);
+        ctx.moveTo(lens.x, lens.y);
+        ctx.lineTo(baseTopRight.x, baseTopRight.y);
+        ctx.strokeStyle = `rgba(${lensColor}, 0.9)`;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      }
+
+      if (sceneSettings.infinityFocus && lens) {
+        for (const radius of [18, 30, 43]) {
+          ctx.beginPath();
+          ctx.arc(lens.x, lens.y, radius + Math.sin(floorPulse) * 2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(125, 211, 252, ${0.48 - radius / 120})`;
+          ctx.lineWidth = radius === 18 ? 1.5 : 0.8;
+          ctx.stroke();
+        }
+      }
+
+      if (sceneSettings.overlayMode !== 'none') {
+        const center = project({ x: 0, y: 0.58, z: lensZ * 0.92 });
+        if (center) {
+          const color = sceneSettings.overlayMode === 'burnin'
+            ? '224, 175, 87'
+            : '125, 211, 252';
+          const widthMark = sceneSettings.overlayMode === 'burnin' ? 42 : 34;
+          ctx.strokeStyle = `rgba(${color}, 0.8)`;
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(center.x - widthMark, center.y - 20, widthMark * 2, 40);
+          ctx.fillStyle = `rgba(${color}, 0.85)`;
+          ctx.font = '700 8px monospace';
+          ctx.fillText(
+            sceneSettings.overlayMode === 'burnin' ? 'BURN-IN' : 'GPS SUB',
+            center.x - widthMark + 4,
+            center.y - 25,
+          );
+        }
+      }
+
+      if (sceneSettings.loopMinutes > 0) {
+        const count = Math.min(3, Math.max(1, Math.round(sceneSettings.loopMinutes / 10)));
+        for (let i = 0; i < count; i++) {
+          const radius = 2.0 + i * 0.34;
+          ctx.beginPath();
+          for (let s = 0; s <= 40; s++) {
+            const angle = -Math.PI * 0.25 + (s / 40) * Math.PI * 1.5;
+            const point = project({
+              x: Math.cos(angle) * radius,
+              y: 0.055,
+              z: Math.sin(angle) * radius,
+            });
+            if (!point) continue;
+            if (s === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          }
+          ctx.strokeStyle = `rgba(224, 175, 87, ${0.7 - i * 0.14})`;
+          ctx.lineWidth = i === 0 ? 1.8 : 1;
+          ctx.stroke();
+        }
+      }
+
+      if (sceneSettings.recording) {
+        ctx.fillStyle = sceneSettings.paused
+          ? 'rgba(224, 175, 87, 0.8)'
+          : 'rgba(239, 83, 80, 0.9)';
+        ctx.beginPath();
+        ctx.arc(width - 22, 22, sceneSettings.paused ? 4 : 5 + Math.sin(floorPulse * 2) * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     function animateFloor(timestamp) {
@@ -458,6 +664,7 @@
     mv.addEventListener('dblclick', resetCamera);
     mv.addEventListener('camera-change', drawGrid);
     mv.addEventListener('load', () => {
+      document.getElementById('scene-loader').classList.add('hidden');
       findWheelNodes();
       drawGrid();
       if (!wheelAnimationStarted) {

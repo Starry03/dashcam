@@ -76,6 +76,7 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
 
   void _onViewerCreated(InAppWebViewController controller) {
     _viewerController = controller;
+    setState(() => _viewerReady = false);
     controller.addJavaScriptHandler(
       handlerName: 'hotspotTapped',
       callback: (args) {
@@ -89,10 +90,13 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
     controller.addJavaScriptHandler(
       handlerName: 'viewerReady',
       callback: (_) {
-        _viewerReady = true;
+        if (mounted) {
+          setState(() => _viewerReady = true);
+        }
         _runViewerCommand('setActiveZone(${_jsString(_activeZone)})');
         _syncViewerSpeed();
         _syncViewerBadges();
+        _syncViewerSettings();
         return null;
       },
     );
@@ -141,6 +145,18 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
     _runViewerCommand('setVehicleSpeed(${widget.speedKmh})');
   }
 
+  void _syncViewerSettings() {
+    final settings = jsonEncode({
+      'frontCamera': widget.isFrontCamera,
+      'infinityFocus': widget.infinityFocus,
+      'overlayMode': widget.videoOverlayMode,
+      'loopMinutes': widget.loopRecordingMinutes,
+      'recording': widget.isRecording,
+      'paused': widget.isPaused,
+    });
+    _runViewerCommand('setSceneSettings(${_jsString(settings)})');
+  }
+
   @override
   void didUpdateWidget(covariant VehicleVisualizer oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -151,6 +167,14 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
         oldWidget.loopRecordingMinutes != widget.loopRecordingMinutes) {
       _syncViewerBadges();
     }
+    if (oldWidget.isFrontCamera != widget.isFrontCamera ||
+        oldWidget.infinityFocus != widget.infinityFocus ||
+        oldWidget.videoOverlayMode != widget.videoOverlayMode ||
+        oldWidget.loopRecordingMinutes != widget.loopRecordingMinutes ||
+        oldWidget.isRecording != widget.isRecording ||
+        oldWidget.isPaused != widget.isPaused) {
+      _syncViewerSettings();
+    }
   }
 
   @override
@@ -159,6 +183,7 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
       fit: StackFit.expand,
       children: [
         Positioned.fill(child: _buildViewer()),
+        if (!_viewerReady) const Positioned.fill(child: _SceneLoadingOverlay()),
         if (_activeZone != null)
           Positioned(
             left: 12,
@@ -205,6 +230,81 @@ class VehicleVisualizerState extends State<VehicleVisualizer> {
         mediaPlaybackRequiresUserGesture: false,
       ),
       onWebViewCreated: _onViewerCreated,
+    );
+  }
+}
+
+class _SceneLoadingOverlay extends StatelessWidget {
+  const _SceneLoadingOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: ColoredBox(
+        color: Color(0xE60B1017),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 52,
+                height: 52,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 52,
+                      height: 52,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0x5538BDF8),
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFF38BDF8),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF38BDF8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0xAA38BDF8),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'INITIALIZING VEHICLE HUD',
+                style: TextStyle(
+                  color: Color(0xFFB7DFF0),
+                  fontFamily: 'monospace',
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
