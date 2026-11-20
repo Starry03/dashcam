@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_3d_controller/flutter_3d_controller.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 class VehicleVisualizer extends StatefulWidget {
   const VehicleVisualizer({
@@ -35,285 +39,154 @@ class VehicleVisualizer extends StatefulWidget {
   State<VehicleVisualizer> createState() => VehicleVisualizerState();
 }
 
-// VEHICLE VISUALIZER STATE - GLB rendering handled by Flutter3DController
+// VEHICLE VISUALIZER STATE - GLB rendering handled by model-viewer
 // -----------------------------------------------------------------------------
 class VehicleVisualizerState extends State<VehicleVisualizer> {
-  final Flutter3DController _modelController = Flutter3DController();
+  InAppWebViewController? _viewerController;
+  bool _viewerReady = false;
   String? _activeZone;
-
-  @override
-  void initState() {
-    super.initState();
-    _modelController.onModelLoaded.addListener(_onModelLoaded);
-  }
-
-  void _onModelLoaded() {
-    if (_modelController.onModelLoaded.value) {
-      _applyDefaultCamera();
-    }
-  }
-
-  void _applyDefaultCamera() {
-    _modelController.setCameraTarget(0, 0.45, 0);
-    _modelController.setCameraOrbit(-30, 72, 75);
-  }
-
-  @override
-  void dispose() {
-    _modelController.onModelLoaded.removeListener(_onModelLoaded);
-    super.dispose();
-  }
 
   void resetCameraOrbit() {
     setState(() => _activeZone = null);
-    _applyDefaultCamera();
+    _runViewerCommand('resetCamera()');
   }
 
   void _focusVehicleZone(String zone) {
-    setState(() {
-      if (_activeZone == zone) {
-        _activeZone = null;
-        _applyDefaultCamera();
-      } else {
-        _activeZone = zone;
-        if (zone == 'front') {
-          _modelController.setCameraTarget(0.2, 0.5, 0.2);
-          _modelController.setCameraOrbit(-36, 74, 65);
-        } else if (zone == 'cabin') {
-          _modelController.setCameraTarget(-0.2, 0.55, -0.1);
-          _modelController.setCameraOrbit(42, 66, 68);
-        }
-      }
-    });
+    final nextZone = _activeZone == zone ? null : zone;
+    setState(() => _activeZone = nextZone);
+    _runViewerCommand('setActiveZone(${_jsString(nextZone)})');
+    if (nextZone == null) {
+      _runViewerCommand('resetCamera()');
+    } else {
+      _runViewerCommand('focusZone(${_jsString(nextZone)})');
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final h = constraints.maxHeight;
-        final clampedFrontX = (w * 0.68).clamp(76.0, w - 85.0);
-        final clampedFrontY = (h * 0.45).clamp(32.0, h - 54.0);
-        final clampedCabinX = (w * 0.35).clamp(76.0, w - 85.0);
-        final clampedCabinY = (h * 0.38).clamp(32.0, h - 54.0);
+  String _jsString(String? value) {
+    if (value == null) return 'null';
+    return "'${value.replaceAll("'", r"\'")}'";
+  }
 
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onDoubleTap: resetCameraOrbit,
-                child: Flutter3DViewer(
-                  src: 'assets/models/sedan-sports.glb',
-                  controller: _modelController,
-                  activeGestureInterceptor: true,
-                  enableTouch: true,
-                  progressBarColor: Colors.transparent,
-                  onLoad: (_) => _applyDefaultCamera(),
-                ),
-              ),
-            ),
-            Positioned(
-              left: clampedFrontX,
-              top: clampedFrontY,
-              child: FractionalTranslation(
-                translation: const Offset(-0.15, -0.5),
-                child: _SpatialHotspotButton(
-                  title: 'FRONT CAM',
-                  badgeText: widget.isFrontCamera ? 'Front' : 'Rear',
-                  subtitle:
-                      'Ottica & Focus · ${widget.videoOverlayMode == 'subtitles'
-                          ? 'Sub'
-                          : widget.videoOverlayMode == 'burnin'
-                          ? 'Burn'
-                          : 'No OVL'}',
-                  accentColor: const Color(0xFF38BDF8),
-                  active: _activeZone == 'front',
-                  onTap: () => _focusVehicleZone('front'),
-                ),
-              ),
-            ),
-            Positioned(
-              left: clampedCabinX,
-              top: clampedCabinY,
-              child: FractionalTranslation(
-                translation: const Offset(-0.85, -0.5),
-                child: _SpatialHotspotButton(
-                  title: 'CABIN HUB',
-                  badgeText: widget.loopRecordingMinutes == 0
-                      ? 'Loop Off'
-                      : '${widget.loopRecordingMinutes}m',
-                  subtitle: 'Clip & Galleria',
-                  accentColor: const Color(0xFF38BDF8),
-                  active: _activeZone == 'cabin',
-                  onTap: () => _focusVehicleZone('cabin'),
-                ),
-              ),
-            ),
-            if (_activeZone != null)
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 8,
-                child: _activeZone == 'front'
-                    ? _FrontOpticsQuickCard(
-                        isRecording: widget.isRecording,
-                        isFrontCamera: widget.isFrontCamera,
-                        infinityFocus: widget.infinityFocus,
-                        videoOverlayMode: widget.videoOverlayMode,
-                        onSwitchLens: widget.onSwitchLens,
-                        onToggleInfinityFocus: widget.onToggleInfinityFocus,
-                        onChangeOverlayMode: widget.onChangeOverlayMode,
-                        onClose: () => setState(() => _activeZone = null),
-                      )
-                    : _CabinHubQuickCard(
-                        loopRecordingMinutes: widget.loopRecordingMinutes,
-                        onChangeLoopRecording: widget.onChangeLoopRecording,
-                        onOpenGallery: widget.onOpenGallery,
-                        onClose: () => setState(() => _activeZone = null),
-                      ),
-              ),
-          ],
-        );
+  void _runViewerCommand(String command) {
+    if (!_viewerReady) return;
+    _viewerController?.evaluateJavascript(source: command);
+  }
+
+  void _onViewerCreated(InAppWebViewController controller) {
+    _viewerController = controller;
+    controller.addJavaScriptHandler(
+      handlerName: 'hotspotTapped',
+      callback: (args) {
+        final zone = args.isNotEmpty ? args.first : null;
+        if (zone is String && (zone == 'front' || zone == 'cabin')) {
+          _focusVehicleZone(zone);
+        }
+        return null;
       },
     );
+    controller.addJavaScriptHandler(
+      handlerName: 'viewerReady',
+      callback: (_) {
+        _viewerReady = true;
+        _runViewerCommand('setActiveZone(${_jsString(_activeZone)})');
+        _syncViewerBadges();
+        return null;
+      },
+    );
+    unawaited(_loadViewer(controller));
   }
-}
 
-// SPATIAL HOTSPOT PIN & GLASS CARD (EXACT HTML lines 188-217)
-// ----------------------------------------------------------------------------
-class _SpatialHotspotButton extends StatelessWidget {
-  const _SpatialHotspotButton({
-    required this.title,
-    required this.badgeText,
-    required this.subtitle,
-    required this.accentColor,
-    required this.active,
-    required this.onTap,
-  });
+  Future<void> _loadViewer(InAppWebViewController controller) async {
+    final template = await rootBundle.loadString('assets/viewer.html');
+    final modelViewerScript = await rootBundle.loadString(
+      'packages/flutter_3d_controller/assets/model_viewer.min.js',
+    );
+    final model = await rootBundle.load('assets/models/sedan-sports.glb');
+    final modelData = base64Encode(
+      model.buffer.asUint8List(model.offsetInBytes, model.lengthInBytes),
+    );
+    final html = template
+        .replaceFirst('__MODEL_VIEWER_SCRIPT__', modelViewerScript)
+        .replaceFirst('__MODEL_DATA__', modelData);
 
-  final String title;
-  final String badgeText;
-  final String subtitle;
-  final Color accentColor;
-  final bool active;
-  final VoidCallback onTap;
+    await controller.loadData(
+      data: html,
+      mimeType: 'text/html',
+      encoding: 'utf-8',
+      baseUrl: WebUri('https://dashcam.local/'),
+    );
+  }
+
+  void _syncViewerBadges() {
+    final lens = widget.isFrontCamera ? 'Front' : 'Rear';
+    final loop = widget.loopRecordingMinutes == 0
+        ? 'Loop Off'
+        : '${widget.loopRecordingMinutes}m';
+    _runViewerCommand("updateBadge('badge-lens', ${_jsString(lens)})");
+    _runViewerCommand("updateBadge('badge-loop', ${_jsString(loop)})");
+  }
+
+  @override
+  void didUpdateWidget(covariant VehicleVisualizer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isFrontCamera != widget.isFrontCamera ||
+        oldWidget.loopRecordingMinutes != widget.loopRecordingMinutes) {
+      _syncViewerBadges();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // Circular pulsing beacon ring + center dot (matches user screenshot and HTML)
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: accentColor.withValues(alpha: 0.20),
-              border: Border.all(
-                color: accentColor.withValues(alpha: 0.75),
-                width: 1.3,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.45),
-                  blurRadius: 12,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-            child: Center(
-              child: Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: accentColor,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(
-                0xEB111621,
-              ), // glass-card rgba(17, 22, 33, 0.68)
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: active
-                    ? accentColor
-                    : accentColor.withValues(alpha: 0.35),
-                width: active ? 1.5 : 1.0,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.75),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: accentColor,
-                        fontSize: 8.5,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.1,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4.5,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: accentColor.withValues(alpha: 0.20),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        badgeText,
-                        style: TextStyle(
-                          color: accentColor,
-                          fontSize: 8,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w500,
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(child: _buildViewer()),
+        if (_activeZone != null)
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 8,
+            child: _activeZone == 'front'
+                ? _FrontOpticsQuickCard(
+                    isRecording: widget.isRecording,
+                    isFrontCamera: widget.isFrontCamera,
+                    infinityFocus: widget.infinityFocus,
+                    videoOverlayMode: widget.videoOverlayMode,
+                    onSwitchLens: widget.onSwitchLens,
+                    onToggleInfinityFocus: widget.onToggleInfinityFocus,
+                    onChangeOverlayMode: widget.onChangeOverlayMode,
+                    onClose: () => setState(() {
+                      _activeZone = null;
+                      _runViewerCommand('setActiveZone(null)');
+                    }),
+                  )
+                : _CabinHubQuickCard(
+                    loopRecordingMinutes: widget.loopRecordingMinutes,
+                    onChangeLoopRecording: widget.onChangeLoopRecording,
+                    onOpenGallery: widget.onOpenGallery,
+                    onClose: () => setState(() {
+                      _activeZone = null;
+                      _runViewerCommand('setActiveZone(null)');
+                    }),
                   ),
-                ),
-              ],
-            ),
           ),
-        ],
+      ],
+    );
+  }
+
+  Widget _buildViewer() {
+    // Widget tests do not register a platform implementation.
+    if (InAppWebViewPlatform.instance == null) {
+      return const SizedBox.expand();
+    }
+    return InAppWebView(
+      initialSettings: InAppWebViewSettings(
+        transparentBackground: true,
+        javaScriptEnabled: true,
+        supportZoom: false,
+        mediaPlaybackRequiresUserGesture: false,
       ),
+      onWebViewCreated: _onViewerCreated,
     );
   }
 }

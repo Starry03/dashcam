@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <script type="module">__MODEL_VIEWER_SCRIPT__</script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+
+    model-viewer {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      --progress-bar-color: transparent;
+      --progress-mask: transparent;
+      touch-action: none;
+    }
+
+    /* ── Spatial Hotspot Pin (beacon + label card) ── */
+    .hotspot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      outline: none;
+      white-space: nowrap;
+      /* model-viewer uses visibility:hidden when behind mesh */
+    }
+
+    .beacon {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.20);
+      border: 1.3px solid rgba(56, 189, 248, 0.75);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.50);
+      flex-shrink: 0;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 8px rgba(56,189,248,0.40); }
+      50%       { box-shadow: 0 0 20px rgba(56,189,248,0.75); }
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #38BDF8;
+    }
+
+    .card {
+      background: rgba(17, 22, 33, 0.92);
+      border: 1px solid rgba(56, 189, 248, 0.38);
+      border-radius: 12px;
+      padding: 6px 10px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.80);
+      transition: border-color .18s;
+    }
+    .hotspot.active .card,
+    .hotspot:active .card { border-color: rgba(56, 189, 248, 0.90); }
+
+    .title-row {
+      display: flex; align-items: center; gap: 5px;
+    }
+    .title {
+      color: #38BDF8;
+      font-size: 8.5px;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      letter-spacing: 1.1px;
+    }
+    .badge {
+      background: rgba(56,189,248,0.20);
+      color: #38BDF8;
+      font-size: 8px;
+      font-family: 'Courier New', monospace;
+      padding: 1.5px 4.5px;
+      border-radius: 4px;
+    }
+    .sub {
+      display: block;
+      color: #fff;
+      font-size: 10.5px;
+      font-weight: 500;
+      margin-top: 2px;
+      font-family: system-ui, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <model-viewer
+    id="mv"
+    src="data:model/gltf-binary;base64,__MODEL_DATA__"
+    camera-controls
+    camera-target="0m 0.45m 0m"
+    camera-orbit="-30deg 72deg 75%"
+    interaction-prompt="none"
+    style="background:transparent;">
+
+    <!-- ── HOTSPOT 1: Front Windshield / Dashcam Optics ── -->
+    <button slot="hotspot-front"
+      data-position="0.65m 0.58m 0.38m"
+      data-normal="0 0.3 1"
+      class="hotspot"
+      id="hs-front"
+      onclick="tapHotspot('front')">
+      <div class="beacon"><div class="dot"></div></div>
+      <div class="card">
+        <div class="title-row">
+          <span class="title">FRONT CAM</span>
+          <span class="badge" id="badge-lens">Rear</span>
+        </div>
+        <span class="sub">Ottica &amp; Focus</span>
+      </div>
+    </button>
+
+    <!-- ── HOTSPOT 2: Cabin / Roof ── -->
+    <button slot="hotspot-cabin"
+      data-position="-0.15m 0.74m -0.12m"
+      data-normal="0 1 0"
+      class="hotspot"
+      id="hs-cabin"
+      onclick="tapHotspot('cabin')">
+      <div class="beacon"><div class="dot"></div></div>
+      <div class="card">
+        <div class="title-row">
+          <span class="title">CABIN HUB</span>
+          <span class="badge" id="badge-loop">Loop Off</span>
+        </div>
+        <span class="sub">Clip &amp; Galleria</span>
+      </div>
+    </button>
+  </model-viewer>
+
+  <script>
+    const mv = document.getElementById('mv');
+    mv.addEventListener('dblclick', resetCamera);
+
+    // ── Called by hotspot click ──
+    function tapHotspot(zone) {
+      window.flutter_inappwebview.callHandler('hotspotTapped', zone);
+    }
+
+    // ── Called by Flutter to reset camera ──
+    function resetCamera() {
+      mv.setAttribute('camera-target', '0m 0.45m 0m');
+      mv.setAttribute('camera-orbit', '-30deg 72deg 75%');
+    }
+
+    // ── Called by Flutter to auto-rotate toward a zone ──
+    function focusZone(zone) {
+      if (zone === 'front') {
+        mv.setAttribute('camera-target', '0.2m 0.5m 0.2m');
+        mv.setAttribute('camera-orbit', '-36deg 74deg 65%');
+      } else if (zone === 'cabin') {
+        mv.setAttribute('camera-target', '-0.2m 0.55m -0.1m');
+        mv.setAttribute('camera-orbit', '42deg 66deg 68%');
+      }
+    }
+
+    // ── Highlight the active hotspot ──
+    function setActiveZone(zone) {
+      document.querySelectorAll('.hotspot').forEach(h => h.classList.remove('active'));
+      if (zone) {
+        const el = document.getElementById('hs-' + zone);
+        if (el) el.classList.add('active');
+      }
+    }
+
+    // ── Update a badge text from Flutter ──
+    function updateBadge(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    // ── Notify Flutter when WebView is ready ──
+    mv.addEventListener('load', () => {
+      window.flutter_inappwebview.callHandler('viewerReady');
+    });
+  </script>
+</body>
+</html>
