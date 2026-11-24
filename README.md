@@ -1,43 +1,39 @@
-# Dashcam
+# 🚨 Dashcam Pro — Turn Your Phone Into a Real Car Dashcam!
+
+📹 Record the road in real time, even while you're behind the wheel. With **background recording**, **autofocus**, and **loop management**, your dashcam stays smooth, distraction-free, and always on.
 
 [![Release](https://img.shields.io/github/v/release/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/releases) [![License](https://img.shields.io/github/license/Starry03/dashcam?style=flat-square)](LICENSE) [![Last Commit](https://img.shields.io/github/last-commit/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/commits) [![Issues](https://img.shields.io/github/issues/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/issues) [![Stars](https://img.shields.io/github/stars/Starry03/dashcam?style=flat-square)](https://github.com/Starry03/dashcam/stargazers)
 
-Dashcam is a Flutter (Kotlin/CameraX) app that turns your phone into a practical in-car dashcam with foreground recording, loop management, and quick controls.
-
-<p align="center">
-  <img src="./assets/home.jpg" alt="Home screen" width="250" />
-</p>
-
-
-## Notes
+---
 
 Do you want an
-- overengineered
-- vibecoded
-- only android
 
-dashcam application?
+- **Overengineered**
+- **Vibecoded**
+- **Only Android**
 
-### Advantages
-- you have a free dashcam
-- background recording (no need to keep you camera running which can distract you)
-- autofocus (so you don't record your car but the others)
+dashcam app?
 
-## Download
+### ✅ Advantages
 
-Available for android
+- **You’ve got a free dashcam.**
+- **Background recording** — no need to keep the camera on your phone (distracting? nope.)
+- **Autofocus** — so you don’t miss shots from passing cars.
 
-[Download latest release](https://github.com/Starry03/dashcam/releases/latest)
+## 📥 Download
 
-## Local development
+Available for Android
+[🔗 Latest Release](https://github.com/Starry03/dashcam/releases/latest)
+
+## 🛠️ Local Development
 
 ### Requirements
 
 - Flutter SDK
 - Android SDK / Android Studio
-- Physical Android device recommended for camera and GPS testing
+- Physical Android device (camera & GPS testing recommended)
 
-### Run in debug
+### Run in Debug
 
 ```bash
 git clone https://github.com/Starry03/dashcam.git
@@ -54,6 +50,6 @@ flutter pub get
 flutter build apk
 ```
 
-## Roadmap
+## 🗺️ Roadmap
 
-- iOS parity
+- iOS parity — coming soon!
